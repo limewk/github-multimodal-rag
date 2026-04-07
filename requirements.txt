@@ -10,6 +10,10 @@ langchain
 langchain-core
 langchain-community
 langchain-openai
+jinja2
+
+# Prompt Management
+ai-prompter
 
 # Vector Database (Qdrant or Milvus)
 qdrant-client

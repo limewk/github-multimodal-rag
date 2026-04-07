@@ -16,13 +16,14 @@
 ├── data/                # 爬取的或处理中的临时数据与向量库本地文件
 ├── docs/                # 项目文档（包括 API 文档、需求规格、设计文档）
 │   ├── PLAN.md          # <- 项目实施与系统开发详细计划
-│   └── ARCHITECTURE.md  # 架构设计文档
+│   └── SETUP.md         # 项目环境配置指南
 ├── src/                 # 核心后端与后端代码目录
 │   ├── api/             # FastAPI/Flask 接口路由和控制器代码
 │   ├── ingestion/       # GitHub 数据摄取模块 (克隆、拉取、爬取 Issue 和 PR)
 │   ├── processing/      # 数据清洗与切分 (代码AST解析、Markdown解析、图片抽取)
 │   ├── retrieval/       # Embedding 模型加载，向量数据库的连接、写入与混合检索
 │   ├── generation/      # RAG 核心管道层与大模型(LLM/VLM)交互模块
+│   ├── prompts/         # 集中式提示词存储库 (基于 ai-prompter 与 Jinja2 组装)
 │   └── utils/           # 通用工具函数、日志配置、异常处理
 ├── ui/                  # 前端 Vue 3 单页面应用源码 (使用 Vite 打包)
 ├── tests/               # 单元测试与集成测试
@@ -32,9 +33,12 @@
 ```
 
 ## 快速运行 (Quick Start)
-*(待实现后更新)*
-1. `conda create -n github-rag python=3.10`
-2. `pip install -r requirements.txt`
-3. 配置 `.env` 中的秘钥
-4. 运行 API `uvicorn src.api.main:app --reload`
-5. 启动前端 `cd ui && npm install && npm run dev`
+请参考 [docs/SETUP.md](docs/SETUP.md) 获取详细的环境配置（包含前端 Vite 及后端 FastAPI 的集成运行步骤）。简要后端启动流程如下：
+
+1. `python -m venv venv`
+2. `.\venv\Scripts\Activate.ps1` (Windows) 或 `source venv/bin/activate` (Mac/Linux)
+3. `pip install -r requirements.txt`
+4. 复制 `.env.example` 到 `.env` 并配置对应秘钥与 Qdrant 数据库连接信息。
+5. 运行 API服务: `uvicorn src.api.chat:router --reload` (或根据您的项目入口调整)
+6. 启动前端: `cd ui && npm install && npm run dev`
+
