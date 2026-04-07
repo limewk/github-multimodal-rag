@@ -1,0 +1,28 @@
+# FastAPI Backend
+fastapi
+uvicorn
+
+# GitHub API Integration
+PyGithub
+
+# Core RAG Framework (LangChain for general LLM orchestration)
+langchain
+langchain-core
+langchain-community
+langchain-openai
+
+# Vector Database (Qdrant or Milvus)
+qdrant-client
+
+# UI (已迁移至 Vue.js，此文件仅配置后端依赖)
+
+# Code parsing / AST
+tree-sitter
+
+# Utilities
+python-dotenv
+requests
+pydantic
+
+# Testing
+pytest
