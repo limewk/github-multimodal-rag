@@ -35,9 +35,9 @@
 ## 快速运行 (Quick Start)
 请参考 [docs/SETUP.md](docs/SETUP.md) 获取详细的环境配置（包含前端 Vite 及后端 FastAPI 的集成运行步骤）。简要后端启动流程如下：
 
-1. `python -m venv venv`
-2. `.\venv\Scripts\Activate.ps1` (Windows) 或 `source venv/bin/activate` (Mac/Linux)
-3. `pip install -r requirements.txt`
+1. `uv venv`
+2. `.\.venv\Scripts\Activate.ps1` (Windows) 或 `source .venv/bin/activate` (Mac/Linux)
+3. `uv pip install -r requirements.txt`
 4. 复制 `.env.example` 到 `.env` 并配置对应秘钥与 Qdrant 数据库连接信息。
 5. 运行 API服务: `uvicorn src.api.chat:router --reload` (或根据您的项目入口调整)
 6. 启动前端: `cd ui && npm install && npm run dev`

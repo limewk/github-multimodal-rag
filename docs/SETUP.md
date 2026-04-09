@@ -7,7 +7,7 @@
 - **Python**: 3.10 或更高版本。
 - **Node.js**: 18.0 或更高版本 (建议使用 LTS 版本)。
 - **Git**: 用于版本控制和代码拉取。
-- **包管理工具**: `pip` (Python) 和 `npm` (Node.js)。
+- **包管理工具**: `uv` (Python) 和 `npm` (Node.js)。
 
 ---
 
@@ -30,21 +30,26 @@ cd 您的仓库名
    cd github-multimodal-rag
    ```
 
-2. **创建 Python 虚拟环境 (Virtual Environment)：**
-   使用虚拟环境可以隔离项目依赖，防止与全局 Python 环境冲突。
-   - Windows: `python -m venv venv`
-   - Mac/Linux: `python3 -m venv venv`
+2. **安装 uv (若尚未安装)：**
+   - macOS (Homebrew): `brew install uv`
+   - macOS/Linux (安装脚本): `curl -LsSf https://astral.sh/uv/install.sh | sh`
+   - Windows (PowerShell): `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`
 
-3. **激活虚拟环境：**
-   - Windows (Command Prompt): `venv\Scripts\activate.bat`
-   - Windows (PowerShell): `.\venv\Scripts\Activate.ps1`
-   - Mac/Linux: `source venv/bin/activate`
-
-4. **安装后端依赖：**
-   激活虚拟环境后，确保命令行前有 `(venv)` 标识，然后执行：
+3. **创建 Python 虚拟环境 (Virtual Environment)：**
+   使用 uv 可以隔离项目依赖，防止与全局 Python 环境冲突。
    ```bash
-   pip install --upgrade pip
-   pip install -r requirements.txt
+   uv venv
+   ```
+
+4. **激活虚拟环境：**
+   - Windows (Command Prompt): `.venv\Scripts\activate.bat`
+   - Windows (PowerShell): `.\.venv\Scripts\Activate.ps1`
+   - Mac/Linux: `source .venv/bin/activate`
+
+5. **安装后端依赖：**
+   激活虚拟环境后，确保命令行前有 `(.venv)` 标识，然后执行：
+   ```bash
+   uv pip install -r requirements.txt
    ```
 
 ---
@@ -95,7 +100,7 @@ cd 您的仓库名
 为了进行日常开发，您需要同时启动后端 API 服务和前端页面。建议在 VS Code 中**开启两个终端**分别运行。
 
 ### 终端 1：启动 FastAPI 后端服务
-1. 确保在根目录 `github-multimodal-rag/` 且**虚拟环境已激活** `(venv)`。
+1. 确保在根目录 `github-multimodal-rag/` 且**虚拟环境已激活** `(.venv)`。
 2. 运行后端服务：
    ```bash
    uvicorn src.api.main:app --reload
