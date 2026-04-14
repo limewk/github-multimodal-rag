@@ -20,19 +20,19 @@
 ## 团队分工与人员职责 (Team Collaboration)
 本项目共有 5 名开发成员，采用敏捷开发模式（Agile/Scrum）。为保证高效落地，任务角色分配如下：
 
-- **成员 A (项目经理 & 核心算法 / Project Lead & RAG Env)**
+- **lwk**
   - 职责：整体项目架构把控、技术难点攻坚；负责核心 RAG 模型编排框架（LangChain 的引入）与多模态 Prompt Engineering 调优。
   - 主要模块：`src/generation` 模块的底层逻辑设计与联调。
-- **成员 B (数据爬取工程师 / Data Ingestion)**
+- **cyd**
   - 职责：对接 GitHub API，抓取代码树、Issues、拉取图片；解决反爬和代理墙；验证多种代码语言（Python, Java 等）下的爬取稳定性。
   - 主要模块：`src/ingestion`。
-- **成员 C (后端与大模型接入 / Backend & LLM API)**
-  - 职责：开发 FastAPI 服务，管理各个应用路由；负责对接 GPT-4 / Qwen 等大模型 API 及异常重试处理；提供标准的 RESTful 接口供前端调用。
+- **cml**
+  - 职责：开发 FastAPI 服务，管理各个应用路由；负责对接 GPT-4 / Qwen 等大模型 API 及异常重试处理；提供标准的 RESTful 接口供前端调用，核心代码 Chunking 切块（Tree-sitter） 的解析引入，图文数据的映射，混合搜索算法实现。
   - 主要模块：`src/api`, `src/utils`。
-- **成员 D (数据解析与向量检索 / Processing & Retrieval)**
-  - 职责：核心代码 Chunking 切块（Tree-sitter 的解析引入）、图文数据的映射；主导 Qdrant/Milvus 向量库的构建和混合搜索算法实现（Hybrid Search）。
+- **zyb**
+  - 职责：；主导 Qdrant 向量库的构建。
   - 主要模块：`src/processing`, `src/retrieval`。
-- **成员 E (前端开发与交互体验 / Frontend Dev)**
+- **gzx**
   - 职责：利用 Vue 3 + Vite 开发单页面 SPA 应用；完成流式响应 (Streaming 或是 Websocket) 接入；以及代码高亮、图片预览、多模态交互界面设计。
   - 主要模块：`ui/`。
 
