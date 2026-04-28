@@ -10,6 +10,7 @@ langchain
 langchain-core
 langchain-community
 langchain-openai
+langchain-text-splitters
 jinja2
 
 # Prompt Management

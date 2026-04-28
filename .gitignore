@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.pyo
+.pytest_cache/
+pytest-cache-files-*/
+tests/tmp-pytest/
 
 # Venv
 venv/
