@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -5,6 +7,7 @@ from src.ingestion.indexing import index_repository
 
 
 router = APIRouter(prefix="/repos", tags=["repositories"])
+logger = logging.getLogger(__name__)
 
 
 class IndexRepositoryRequest(BaseModel):
@@ -31,7 +34,9 @@ def index_repository_endpoint(request: IndexRepositoryRequest):
     try:
         result = index_repository(source, branch=request.branch)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("Failed to index repository source=%s branch=%s", source, request.branch)
+        detail = str(exc) or exc.__class__.__name__
+        raise HTTPException(status_code=500, detail=detail) from exc
 
     return IndexRepositoryResponse(
         repo_id=result.repo_id,

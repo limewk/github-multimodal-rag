@@ -10,6 +10,19 @@ const statusText = ref('')
 const isIndexing = ref(false)
 const isAnswering = ref(false)
 
+const readJsonResponse = async (response) => {
+  const text = await response.text()
+  if (!text.trim()) {
+    return { detail: `服务返回了空响应（HTTP ${response.status}）` }
+  }
+
+  try {
+    return JSON.parse(text)
+  } catch {
+    return { detail: text }
+  }
+}
+
 const handleProcess = async () => {
   if (!repositorySource.value.trim()) return
   isIndexing.value = true
@@ -25,9 +38,9 @@ const handleProcess = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     })
-    const data = await response.json()
+    const data = await readJsonResponse(response)
     if (!response.ok) {
-      throw new Error(data.detail || `请求失败：${response.status}`)
+      throw new Error(formatErrorDetail(data.detail, response.status))
     }
     repoId.value = data.repo_id
     statusText.value = `索引完成：${data.chunks} 个 chunks，repo_id=${data.repo_id}`
@@ -50,7 +63,8 @@ const handleQuery = async () => {
       body: JSON.stringify({ repo_id: repoId.value, question: query.value })
     })
     if (!response.ok || !response.body) {
-      throw new Error(`请求失败：${response.status}`)
+      const data = await readJsonResponse(response)
+      throw new Error(formatErrorDetail(data.detail, response.status))
     }
 
     const reader = response.body.getReader()
@@ -79,11 +93,21 @@ const handleQuery = async () => {
     isAnswering.value = false
   }
 }
+
+const formatErrorDetail = (detail, status) => {
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item.msg || JSON.stringify(item)).join('\n')
+  }
+  if (detail && typeof detail === 'object') {
+    return JSON.stringify(detail)
+  }
+  return detail || `请求失败：${status}`
+}
 </script>
 
 <template>
   <main class="container">
-    <h1>面向 GitHub 仓库的多模态RAG辅助助手</h1>
+    <h1>面向 GitHub 仓库的多模态 RAG 辅助助手</h1>
 
     <section class="settings">
       <h2>仓库索引</h2>
@@ -91,7 +115,7 @@ const handleQuery = async () => {
         <input v-model="repositorySource" type="text" placeholder="GitHub URL 或本地仓库路径" />
         <input v-model="branch" class="branch-input" type="text" placeholder="branch" />
         <button :disabled="isIndexing" @click="handleProcess">
-          {{ isIndexing ? '索引中...' : '开始分析仓库索引' }}
+          {{ isIndexing ? '索引中...' : '开始分析仓库' }}
         </button>
       </div>
       <p v-if="statusText" class="status">{{ statusText }}</p>
@@ -103,8 +127,8 @@ const handleQuery = async () => {
         <input
           v-model="query"
           :disabled="!repoId || isAnswering"
-          @keyup.enter="handleQuery"
           placeholder="先索引仓库，再基于源码、README 或图片引用提问"
+          @keyup.enter="handleQuery"
         />
         <button :disabled="!repoId || isAnswering" @click="handleQuery">
           {{ isAnswering ? '生成中...' : '发送' }}

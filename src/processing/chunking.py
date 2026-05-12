@@ -1,5 +1,7 @@
 import re
-from collections.abc import Iterable
+from collections import Counter
+from bisect import bisect_right
+from collections.abc import Iterable, Iterator
 
 from langchain_core.documents import Document
 from langchain_text_splitters import Language, RecursiveCharacterTextSplitter
@@ -20,6 +22,7 @@ CODE_LANGUAGE_MAP = {
 }
 
 IMAGE_MARKDOWN_PATTERN = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<url>[^)]+)\)")
+MANIFEST_FILES_PER_DOCUMENT = 200
 
 def split_markdown(text: str) -> list:
     """
@@ -50,44 +53,54 @@ def repository_file_to_documents(repo_id: str, repo_file) -> list[Document]:
     Convert an ingested repository file into chunked LangChain Documents.
     Metadata is kept consistent across code, markdown, text, and image references.
     """
+    return list(iter_repository_file_documents(repo_id, repo_file))
+
+
+def iter_repository_file_documents(repo_id: str, repo_file) -> Iterator[Document]:
     if repo_file.source_type == "image_reference":
-        return [
-            Document(
-                page_content=repo_file.content,
-                metadata=_base_metadata(repo_id, repo_file, 0, 1, 1),
-            )
-        ]
+        yield Document(
+            page_content=repo_file.content,
+            metadata=_base_metadata(repo_id, repo_file, 0, 1, 1),
+        )
+        return
 
     chunks = _split_by_source(repo_file.content, repo_file.source_type, repo_file.language)
-    documents: list[Document] = []
     search_offset = 0
+    line_locator = _LineLocator(repo_file.content)
+    text_chunk_count = 0
     for chunk_id, chunk in enumerate(chunks):
         if not chunk.strip():
             continue
 
-        start_line, end_line, search_offset = _locate_lines(
-            repo_file.content, chunk, search_offset
-        )
-        documents.append(
-            Document(
-                page_content=chunk,
-                metadata=_base_metadata(
-                    repo_id, repo_file, chunk_id, start_line, end_line
-                ),
-            )
+        start_line, end_line, search_offset = line_locator.locate(chunk, search_offset)
+        text_chunk_count += 1
+        yield Document(
+            page_content=chunk,
+            metadata=_base_metadata(
+                repo_id, repo_file, chunk_id, start_line, end_line
+            ),
         )
 
     if repo_file.source_type == "markdown":
-        documents.extend(_image_reference_documents(repo_id, repo_file, len(documents)))
-
-    return documents
+        yield from _image_reference_documents(repo_id, repo_file, text_chunk_count)
 
 
 def repository_files_to_documents(repo_id: str, files: Iterable) -> list[Document]:
-    documents: list[Document] = []
+    return list(iter_repository_documents(repo_id, files))
+
+
+def iter_repository_documents(repo_id: str, files: Iterable) -> Iterator[Document]:
+    manifest_entries = []
     for repo_file in files:
-        documents.extend(repository_file_to_documents(repo_id, repo_file))
-    return documents
+        manifest_entries.append(
+            {
+                "path": repo_file.path,
+                "source_type": repo_file.source_type,
+                "language": repo_file.language or "unknown",
+            }
+        )
+        yield from iter_repository_file_documents(repo_id, repo_file)
+    yield from _repository_manifest_documents(repo_id, manifest_entries)
 
 
 def _split_by_source(text: str, source_type: str, language: str | None) -> list[str]:
@@ -121,16 +134,107 @@ def _base_metadata(repo_id: str, repo_file, chunk_id: int, start_line: int, end_
     }
 
 
-def _locate_lines(text: str, chunk: str, search_offset: int) -> tuple[int, int, int]:
-    index = text.find(chunk, search_offset)
-    if index < 0:
-        index = text.find(chunk)
-    if index < 0:
-        index = search_offset
+def _repository_manifest_documents(repo_id: str, entries: list[dict]) -> Iterator[Document]:
+    if not entries:
+        return
 
-    start_line = text.count("\n", 0, index) + 1
-    end_line = start_line + chunk.count("\n")
-    return start_line, end_line, index + len(chunk)
+    yield _repo_summary_document(repo_id, entries)
+    yield from _repo_file_manifest_documents(repo_id, entries)
+
+
+def _repo_summary_document(repo_id: str, entries: list[dict]) -> Document:
+    language_counts = Counter(entry["language"] for entry in entries)
+    type_counts = Counter(entry["source_type"] for entry in entries)
+    top_level_counts = Counter(_top_level_dir(entry["path"]) for entry in entries)
+
+    language_lines = _format_counter(language_counts)
+    type_lines = _format_counter(type_counts)
+    directory_lines = _format_counter(top_level_counts, limit=80)
+
+    content = (
+        "Repository overview for RAG retrieval.\n"
+        f"Indexed files: {len(entries)}\n\n"
+        "Source types:\n"
+        f"{type_lines}\n\n"
+        "Languages:\n"
+        f"{language_lines}\n\n"
+        "Top-level directories and file counts:\n"
+        f"{directory_lines}"
+    )
+    return Document(
+        page_content=content,
+        metadata={
+            "repo_id": repo_id,
+            "source_type": "repo_overview",
+            "path": "__repo__/overview.md",
+            "language": "text",
+            "chunk_id": 0,
+            "start_line": 1,
+            "end_line": content.count("\n") + 1,
+        },
+    )
+
+
+def _repo_file_manifest_documents(repo_id: str, entries: list[dict]) -> Iterator[Document]:
+    sorted_entries = sorted(entries, key=lambda entry: entry["path"])
+    for chunk_id, start in enumerate(range(0, len(sorted_entries), MANIFEST_FILES_PER_DOCUMENT), start=1):
+        batch = sorted_entries[start : start + MANIFEST_FILES_PER_DOCUMENT]
+        lines = [
+            "Repository file manifest for RAG retrieval.",
+            f"Files {start + 1}-{start + len(batch)} of {len(sorted_entries)}:",
+            "",
+        ]
+        lines.extend(
+            f"- {entry['path']} ({entry['source_type']}, {entry['language']})"
+            for entry in batch
+        )
+        content = "\n".join(lines)
+        yield Document(
+            page_content=content,
+            metadata={
+                "repo_id": repo_id,
+                "source_type": "repo_manifest",
+                "path": f"__repo__/manifest_{chunk_id}.md",
+                "language": "text",
+                "chunk_id": chunk_id,
+                "start_line": 1,
+                "end_line": content.count("\n") + 1,
+            },
+        )
+
+
+def _format_counter(counter: Counter, limit: int | None = None) -> str:
+    items = counter.most_common(limit)
+    if not items:
+        return "- none"
+    return "\n".join(f"- {name}: {count}" for name, count in items)
+
+
+def _top_level_dir(path: str) -> str:
+    parts = path.split("/")
+    return parts[0] if len(parts) > 1 else "."
+
+
+def _locate_lines(text: str, chunk: str, search_offset: int) -> tuple[int, int, int]:
+    return _LineLocator(text).locate(chunk, search_offset)
+
+
+class _LineLocator:
+    def __init__(self, text: str):
+        self.text = text
+        self.line_starts = [0]
+        self.line_starts.extend(match.end() for match in re.finditer("\n", text))
+
+    def locate(self, chunk: str, search_offset: int) -> tuple[int, int, int]:
+        index = self.text.find(chunk, search_offset)
+        if index < 0:
+            index = self.text.find(chunk)
+        if index < 0:
+            index = min(search_offset, len(self.text))
+
+        start_line = bisect_right(self.line_starts, index)
+        end_line = start_line + chunk.count("\n")
+        return start_line, end_line, index + len(chunk)
 
 
 def _image_reference_documents(repo_id: str, repo_file, first_chunk_id: int) -> list[Document]:

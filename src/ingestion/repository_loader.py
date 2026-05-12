@@ -26,11 +26,20 @@ TEXT_EXTENSIONS = {
     ".kt",
     ".md",
     ".mdx",
+    ".mjs",
+    ".cjs",
     ".py",
+    ".php",
+    ".proto",
     ".rb",
+    ".rst",
     ".rs",
+    ".scala",
     ".sh",
+    ".svelte",
+    ".swift",
     ".sql",
+    ".toml",
     ".ts",
     ".tsx",
     ".txt",
@@ -38,6 +47,15 @@ TEXT_EXTENSIONS = {
     ".xml",
     ".yaml",
     ".yml",
+}
+
+TEXT_FILE_NAMES = {
+    "BUILD",
+    "Dockerfile",
+    "Jenkinsfile",
+    "Makefile",
+    "MODULE.bazel",
+    "WORKSPACE",
 }
 
 IGNORED_DIRS = {
@@ -57,8 +75,23 @@ IGNORED_DIRS = {
     "venv",
 }
 
+IGNORED_FILE_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    ".DS_Store",
+    "package-lock.json",
+    "pnpm-lock.yaml",
+    "poetry.lock",
+    "yarn.lock",
+}
+
+IGNORED_DIR_NAMES_LOWER = {value.lower() for value in IGNORED_DIRS}
+IGNORED_FILE_NAMES_LOWER = {value.lower() for value in IGNORED_FILE_NAMES}
+
 IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
 MAX_TEXT_FILE_BYTES = int(os.getenv("RAG_MAX_TEXT_FILE_BYTES", "1048576"))
+GIT_LS_FILES_TIMEOUT_SECONDS = int(os.getenv("RAG_GIT_LS_FILES_TIMEOUT_SECONDS", "60"))
 
 
 @dataclass(frozen=True)
@@ -104,33 +137,48 @@ def resolve_repository_source(source: str, branch: str = "main") -> tuple[str, P
         return repo_id, target_dir.resolve()
 
     target_dir.parent.mkdir(parents=True, exist_ok=True)
-    command = [
-        "git",
-        "clone",
-        "--depth",
-        "1",
-        "--branch",
-        branch,
-        source,
-        str(target_dir),
-    ]
+    command = ["git", "clone", "--depth", "1"]
+    if branch:
+        command.extend(["--branch", branch])
+    command.extend([source, str(target_dir)])
+
     try:
-        subprocess.run(command, check=True, capture_output=True, text=True, timeout=300)
+        _run_git_command(command, timeout=300)
     except Exception as exc:
-        if target_dir.exists():
+        if branch == "main":
             shutil.rmtree(target_dir, ignore_errors=True)
-        raise RuntimeError(f"Failed to clone repository {source}: {exc}") from exc
+            fallback_command = [
+                "git",
+                "clone",
+                "--depth",
+                "1",
+                source,
+                str(target_dir),
+            ]
+            try:
+                _run_git_command(fallback_command, timeout=300)
+            except Exception as fallback_exc:
+                if target_dir.exists():
+                    shutil.rmtree(target_dir, ignore_errors=True)
+                raise RuntimeError(
+                    f"Failed to clone repository {source}: {fallback_exc}"
+                ) from fallback_exc
+        else:
+            if target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+            raise RuntimeError(f"Failed to clone repository {source}: {exc}") from exc
 
     return repo_id, target_dir.resolve()
 
 
 def iter_repository_files(repo_path: Path) -> Iterable[RepositoryFile]:
-    for path in repo_path.rglob("*"):
-        if not path.is_file() or _is_ignored(path, repo_path):
+    root = repo_path.resolve()
+    for path in _iter_candidate_paths(root):
+        if not path.is_file() or _is_ignored(path, root):
             continue
 
         suffix = path.suffix.lower()
-        rel_path = path.relative_to(repo_path).as_posix()
+        rel_path = path.relative_to(root).as_posix()
 
         if suffix in IMAGE_EXTENSIONS:
             yield RepositoryFile(
@@ -141,7 +189,10 @@ def iter_repository_files(repo_path: Path) -> Iterable[RepositoryFile]:
             )
             continue
 
-        if suffix not in TEXT_EXTENSIONS or path.stat().st_size > MAX_TEXT_FILE_BYTES:
+        if not _is_supported_text_path(path) or path.stat().st_size > MAX_TEXT_FILE_BYTES:
+            continue
+
+        if _looks_binary(path):
             continue
 
         content = _read_text(path)
@@ -190,12 +241,104 @@ def iter_github_issues(source: str, limit: int = 50) -> Iterable[RepositoryFile]
         return []
 
 
+def _iter_candidate_paths(root: Path) -> Iterable[Path]:
+    if _should_use_git_ls_files(root):
+        git_paths = _git_ls_files(root)
+        if git_paths is not None:
+            for rel_path in git_paths:
+                path = (root / rel_path).resolve()
+                if _is_relative_to(path, root):
+                    yield path
+            return
+
+    for current_root, dirnames, filenames in os.walk(root):
+        current_path = Path(current_root)
+        dirnames[:] = [
+            dirname
+            for dirname in dirnames
+            if not _is_ignored_name(dirname, IGNORED_DIR_NAMES_LOWER)
+        ]
+        for filename in filenames:
+            if _is_ignored_name(filename, IGNORED_FILE_NAMES_LOWER):
+                continue
+            yield current_path / filename
+
+
+def _should_use_git_ls_files(root: Path) -> bool:
+    return (
+        os.getenv("RAG_USE_GIT_LS_FILES", "true").lower() not in {"0", "false", "no"}
+        and (root / ".git").exists()
+    )
+
+
+def _git_ls_files(root: Path) -> list[str] | None:
+    try:
+        result = _run_git_command(
+            ["git", "-C", str(root), "ls-files", "-co", "--exclude-standard"],
+            timeout=GIT_LS_FILES_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return None
+
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _run_git_command(command: list[str], timeout: int):
+    return subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+    )
+
+
 def _is_ignored(path: Path, root: Path) -> bool:
     try:
         parts = path.relative_to(root).parts
     except ValueError:
         return True
-    return any(part in IGNORED_DIRS for part in parts)
+    return any(_is_ignored_name(part, IGNORED_DIR_NAMES_LOWER) for part in parts[:-1]) or (
+        bool(parts) and _is_ignored_name(parts[-1], IGNORED_FILE_NAMES_LOWER)
+    )
+
+
+def _is_ignored_name(name: str, ignored_names_lower: set[str]) -> bool:
+    return name.lower() in ignored_names_lower
+
+
+def _is_supported_text_path(path: Path) -> bool:
+    return path.suffix.lower() in TEXT_EXTENSIONS or path.name in TEXT_FILE_NAMES
+
+
+def _looks_binary(path: Path, sample_size: int = 4096) -> bool:
+    try:
+        with path.open("rb") as file:
+            sample = file.read(sample_size)
+    except OSError:
+        return True
+
+    if b"\0" in sample:
+        return True
+    if not sample:
+        return False
+
+    control_bytes = sum(
+        1
+        for byte in sample
+        if byte < 9 or (13 < byte < 32)
+    )
+    return control_bytes / len(sample) > 0.30
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
 
 def _read_text(path: Path) -> str:
@@ -234,11 +377,20 @@ def _language_for_path(path: Path) -> str | None:
         ".kt": "kotlin",
         ".md": "markdown",
         ".mdx": "markdown",
+        ".mjs": "js",
+        ".cjs": "js",
+        ".php": "php",
+        ".proto": "protobuf",
         ".py": "python",
         ".rb": "ruby",
+        ".rst": "rst",
         ".rs": "rust",
+        ".scala": "scala",
         ".sh": "bash",
+        ".svelte": "svelte",
+        ".swift": "swift",
         ".sql": "sql",
+        ".toml": "toml",
         ".ts": "ts",
         ".tsx": "tsx",
         ".vue": "vue",
@@ -246,6 +398,10 @@ def _language_for_path(path: Path) -> str | None:
         ".yaml": "yaml",
         ".yml": "yaml",
     }
+    if path.name == "Dockerfile":
+        return "dockerfile"
+    if path.name == "Makefile":
+        return "makefile"
     return mapping.get(path.suffix.lower())
 
 

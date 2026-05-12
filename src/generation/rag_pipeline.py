@@ -8,19 +8,23 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
-from src.retrieval.vector_store import search_repo
+from src.retrieval.vector_store import hybrid_search_repo, load_repo_context_documents
 
 
 PROMPT_PATH = Path("src/prompts/rag_prompt.jinja2")
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DOTENV_PATH = ROOT_DIR / ".env"
+DEFAULT_RETRIEVAL_K = int(os.getenv("RAG_RETRIEVAL_K", "16"))
+REPO_CONTEXT_DOC_LIMIT = int(os.getenv("RAG_REPO_CONTEXT_DOC_LIMIT", "8"))
+MAX_CONTEXT_CHARS = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "24000"))
 
 
-def format_docs(docs):
+def format_docs(docs, max_chars: int = MAX_CONTEXT_CHARS):
     """
     Format retrieved Documents with source metadata so generated answers can cite files.
     """
     formatted = []
+    used_chars = 0
     for index, doc in enumerate(docs, start=1):
         meta = doc.metadata
         source = meta.get("url") or meta.get("path") or "unknown"
@@ -29,10 +33,19 @@ def format_docs(docs):
         line_info = (
             f":{start_line}-{end_line}" if start_line and end_line else ""
         )
-        formatted.append(
+        header = (
             f"[{index}] {source}{line_info} ({meta.get('source_type', 'unknown')})\n"
-            f"{doc.page_content}"
         )
+        remaining = max_chars - used_chars - len(header)
+        if remaining <= 0:
+            break
+
+        content = doc.page_content
+        if len(content) > remaining:
+            content = content[:remaining].rstrip() + "\n...[truncated]"
+
+        formatted.append(f"{header}{content}")
+        used_chars += len(formatted[-1]) + 2
     return "\n\n".join(formatted)
 
 
@@ -87,8 +100,14 @@ def build_rag_chain():
     return prompt | llm | StrOutputParser()
 
 
-async def stream_rag_answer(repo_id: str, question: str, k: int = 5) -> AsyncIterator[str]:
-    docs = search_repo(repo_id, question, k=k)
+async def stream_rag_answer(repo_id: str, question: str, k: int | None = None) -> AsyncIterator[str]:
+    retrieval_k = k or DEFAULT_RETRIEVAL_K
+    repo_context_docs = load_repo_context_documents(
+        repo_id,
+        limit=REPO_CONTEXT_DOC_LIMIT,
+    )
+    retrieved_docs = hybrid_search_repo(repo_id, question, k=retrieval_k)
+    docs = _merge_documents(repo_context_docs, retrieved_docs)
     context = format_docs(docs)
 
     if _use_offline_answer():
@@ -128,6 +147,25 @@ def _offline_answer(question: str, context: str) -> str:
         f"Question: {question}\n\n"
         f"Retrieved context:\n{preview}"
     )
+
+
+def _merge_documents(*document_groups) -> list:
+    merged = []
+    seen = set()
+    for documents in document_groups:
+        for doc in documents:
+            meta = doc.metadata
+            key = (
+                meta.get("path") or meta.get("url") or "",
+                meta.get("source_type") or "",
+                meta.get("chunk_id") or 0,
+                meta.get("start_line") or 0,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(doc)
+    return merged
 
 
 def _load_json_env(name: str) -> dict:

@@ -1,5 +1,5 @@
 from src.ingestion.repository_loader import RepositoryFile
-from src.processing.chunking import repository_file_to_documents
+from src.processing.chunking import repository_file_to_documents, repository_files_to_documents
 
 
 def test_markdown_documents_keep_required_metadata():
@@ -32,3 +32,27 @@ def test_empty_file_produces_no_text_chunks():
     )
 
     assert repository_file_to_documents("repo-1", repo_file) == []
+
+
+def test_repository_documents_include_project_overview_and_manifest():
+    files = [
+        RepositoryFile(
+            path="README.md",
+            content="# Demo\n\nProject docs.",
+            source_type="markdown",
+            language="markdown",
+        ),
+        RepositoryFile(
+            path="src/app.py",
+            content="def main():\n    return 'ok'\n",
+            source_type="code",
+            language="python",
+        ),
+    ]
+
+    docs = repository_files_to_documents("repo-1", files)
+    source_types = {doc.metadata["source_type"] for doc in docs}
+
+    assert "repo_overview" in source_types
+    assert "repo_manifest" in source_types
+    assert any("src/app.py" in doc.page_content for doc in docs)
