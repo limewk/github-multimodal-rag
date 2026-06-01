@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+pytest-cache-files-*/
+tests/tmp-pytest/
+
+# Venv
+venv/
+env/
+.env
+.venv
+
+# Frontend
+node_modules/
+dist/
+.DS_Store
+
+# VSCode/IDE
+.vscode/
+.idea/
+
+# Data and logs
+data/
+*.log
+
+# Checkpoints
+.ipynb_checkpoints/
