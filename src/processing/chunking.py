@@ -240,7 +240,7 @@ def _fallback_split(content: str, language: str) -> list[str]:
 # ─────────────────────────────────────────────────────────────────
 def _base_metadata(repo_id: str, repo_file, chunk_id: int,
                    start_line: int, end_line: int) -> dict:
-    return {
+    meta = {
         "repo_id":     repo_id,
         "source_type": repo_file.source_type,
         "path":        repo_file.path,
@@ -249,6 +249,10 @@ def _base_metadata(repo_id: str, repo_file, chunk_id: int,
         "start_line":  start_line,
         "end_line":    end_line,
     }
+    for key, value in (getattr(repo_file, "metadata", None) or {}).items():
+        if value is not None:
+            meta[key] = value
+    return meta
 
 
 # ─────────────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # GitHub 多模态 RAG 智能问答系统
 
-本项目面向 GitHub 仓库和本地代码仓库，提供仓库索引、代码结构分析、混合检索增强生成和流式智能问答能力。系统会读取代码、Markdown、文本文件、图片引用和可选的 GitHub Issues，将内容切分成带来源元数据的文档，写入 Qdrant，并在问答时结合仓库概览、文件清单、检索证据和大模型生成回答。
+本项目面向 GitHub 仓库和本地代码仓库，提供仓库索引、代码结构分析、混合检索增强生成和流式智能问答能力。系统会读取代码、Markdown、文本文件、图片引用、图片 OCR 文本和可选的 GitHub Issues，将内容切分成带来源元数据的文档，写入 Qdrant，并在问答时结合仓库概览、文件清单、检索证据和大模型生成回答。
 
 ## 当前进展
 
@@ -10,7 +10,7 @@
 
 - 本地仓库和 GitHub URL 索引。
 - 基于 `git ls-files --exclude-standard` 的仓库文件枚举，避免递归扫描依赖、构建产物和缓存目录。
-- 文本、代码、Markdown、图片引用和 GitHub Issue 的基础入库。
+- 文本、代码、Markdown、图片引用、图片 OCR 文本和 GitHub Issue 的基础入库。
 - 大仓库流式处理：文件、chunk、embedding 和 Qdrant 写入按批推进。
 - 自动生成 `repo_overview` 和 `repo_manifest`，帮助模型理解仓库整体范围。
 - 混合检索：向量召回、关键词/路径召回、轻量重排、重要文件加权、同文件相邻 chunk 扩展。
@@ -23,7 +23,7 @@
 仍待完善：
 
 - AST / Tree-sitter 级符号索引、导入关系和调用链仍可继续增强。
-- 图片内容理解目前只处理图片文件和 Markdown 图片引用，尚未做 OCR/VLM caption。
+- 图片内容理解已支持本地 Tesseract OCR；VLM caption 尚未接入。
 - RAG 质量评测、检索调试接口和前端证据可视化仍可继续深化。
 - 前端对视觉模型图片问答的支持还停留在附件传递层面，后端聊天接口尚未单独接入多模态消息格式。
 
@@ -32,6 +32,7 @@
 - Backend: FastAPI, LangChain, Qdrant, PyGithub
 - Frontend: Vue 3, Vite
 - Retrieval: Qdrant vector search + lexical/path recall + reranking
+- OCR: Tesseract OCR system dependency
 - Embedding: OpenAI embeddings 或本地 deterministic hash embedding
 - LLM: OpenAI-compatible chat API，支持 `LLM_BASE_URL` 接入 ModelScope、DeepSeek、Qwen、Ollama、vLLM 等兼容服务
 - Tests: pytest, Vite build
@@ -104,6 +105,18 @@ RAG_EMBEDDING_PROVIDER=openai
 ```
 
 说明：`OPENAI_API_KEY` 主要用于 embedding；`LLM_API_KEY` 主要用于聊天模型。如果两者都不配置，系统会进入本地开发兜底模式。
+
+图片 OCR 依赖系统 Tesseract。默认配置如下，英文 OCR 通常随 Tesseract 安装可用，中文 OCR 需要额外安装 `chi_sim` 语言包：
+
+```env
+OCR_ENABLED=true
+OCR_LANGS=eng+chi_sim
+OCR_TESSERACT_CMD=tesseract
+OCR_TIMEOUT_SECONDS=20
+OCR_MAX_TEXT_CHARS=8000
+```
+
+macOS 可执行 `brew install tesseract`；Ubuntu/Debian 可执行 `apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim`。如果目标系统缺少中文语言包，系统会降级使用已安装语言，不会阻断上传、索引或问答。
 
 3. 启动后端：
 

@@ -232,3 +232,7 @@ def test_hybrid_search_uses_keyword_path_and_neighbor_expansion(monkeypatch):
         client.close()
         vector_store.get_qdrant_client.cache_clear()
         vector_store.get_vector_store.cache_clear()
+
+
+def test_image_references_are_not_penalized_by_source_type():
+    assert vector_store._source_type_score("image_reference") >= 0

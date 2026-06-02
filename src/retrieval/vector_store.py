@@ -403,7 +403,7 @@ def _source_type_score(source_type: str) -> float:
         "repo_overview": 0.05,
         "repo_manifest": 0.04,
         "issue": 0.02,
-        "image_reference": -0.08,
+        "image_reference": 0.01,
     }
     return weights.get(source_type, 0.0)
 

@@ -4,18 +4,27 @@ from src.ingestion.repository_loader import (
     iter_repository_files,
     repo_id_from_source,
 )
+from src.processing.ocr import OCR_STATUS_OK, OCRResult
 
 
 FIXTURE_REPO = "tests/fixtures/sample_repo"
 
 
-def test_iter_repository_files_reads_text_and_image_references():
+def test_iter_repository_files_reads_text_and_image_references(monkeypatch):
+    monkeypatch.setattr(
+        "src.ingestion.repository_loader.extract_image_text_from_path",
+        lambda path: OCRResult(text="Architecture Overview", status=OCR_STATUS_OK, languages="eng"),
+    )
+
     files = list(iter_repository_files(Path(FIXTURE_REPO)))
     paths = {file.path for file in files}
 
     assert "README.md" in paths
     assert "app.py" in paths
     assert "docs/architecture.png" in paths
+    image_file = next(file for file in files if file.path == "docs/architecture.png")
+    assert "Architecture Overview" in image_file.content
+    assert image_file.metadata["ocr_status"] == OCR_STATUS_OK
 
 
 def test_repo_id_is_stable_for_same_source():

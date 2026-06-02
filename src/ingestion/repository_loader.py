@@ -3,10 +3,12 @@ import os
 import re
 import shutil
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlparse
+
+from src.processing.ocr import OCRResult, extract_image_text_from_path
 
 
 TEXT_EXTENSIONS = {
@@ -89,7 +91,7 @@ IGNORED_FILE_NAMES = {
 IGNORED_DIR_NAMES_LOWER = {value.lower() for value in IGNORED_DIRS}
 IGNORED_FILE_NAMES_LOWER = {value.lower() for value in IGNORED_FILE_NAMES}
 
-IMAGE_EXTENSIONS = {".gif", ".jpeg", ".jpg", ".png", ".svg", ".webp"}
+IMAGE_EXTENSIONS = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".svg", ".tif", ".tiff", ".webp"}
 MAX_TEXT_FILE_BYTES = int(os.getenv("RAG_MAX_TEXT_FILE_BYTES", "1048576"))
 GIT_LS_FILES_TIMEOUT_SECONDS = int(os.getenv("RAG_GIT_LS_FILES_TIMEOUT_SECONDS", "60"))
 
@@ -100,6 +102,7 @@ class RepositoryFile:
     content: str
     source_type: str
     language: str | None = None
+    metadata: dict = field(default_factory=dict)
 
 
 def repo_id_from_source(source: str) -> str:
@@ -181,11 +184,13 @@ def iter_repository_files(repo_path: Path) -> Iterable[RepositoryFile]:
         rel_path = path.relative_to(root).as_posix()
 
         if suffix in IMAGE_EXTENSIONS:
+            ocr = extract_image_text_from_path(path)
             yield RepositoryFile(
                 path=rel_path,
-                content=f"Image asset found in repository: {rel_path}",
+                content=_image_reference_content(rel_path, ocr),
                 source_type="image_reference",
                 language=None,
+                metadata=ocr.metadata(),
             )
             continue
 
@@ -212,6 +217,24 @@ def iter_github_issues(source: str, limit: int = 50) -> Iterable[RepositoryFile]
     repo_name = _github_repo_name(source)
     if not token or not repo_name:
         return []
+
+
+def _image_reference_content(rel_path: str, ocr: OCRResult) -> str:
+    lines = [
+        f"Image asset found in repository: {rel_path}",
+        f"OCR status: {ocr.status}",
+    ]
+    if ocr.languages:
+        lines.append(f"OCR languages: {ocr.languages}")
+    if ocr.missing_languages:
+        lines.append(f"OCR missing languages: {', '.join(ocr.missing_languages)}")
+    if ocr.error:
+        lines.append(f"OCR note: {ocr.error}")
+    if ocr.text:
+        lines.extend(["", "OCR text:", ocr.text])
+    else:
+        lines.append("OCR text: (none)")
+    return "\n".join(lines)
 
     try:
         from github import Github

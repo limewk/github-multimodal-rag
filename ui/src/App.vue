@@ -37,7 +37,7 @@ const msgSources=ref({})
 let twQ='',twRaf=null,twMsg=null
 
 // ─── Upload state ────────────────────────────────────────────────
-const uploadedFiles=ref([])   // {id,name,ext,icon,size,loading,error,contentType,text,base64,mediaType,charCount,pageCount,truncated}
+const uploadedFiles=ref([])   // {id,name,ext,icon,size,loading,error,contentType,text,base64,mediaType,charCount,pageCount,truncated,ocrStatus}
 const isDragOver=ref(false)
 const fileInputRef=ref(null)
 
@@ -402,11 +402,28 @@ const renderMD=(text)=>{
 const UPL_ICONS={pdf:'📄',docx:'📝',doc:'📝',md:'📋',markdown:'📋',txt:'📃',rst:'📃',csv:'📊',png:'🖼',jpg:'🖼',jpeg:'🖼',gif:'🎞',webp:'🖼',bmp:'🖼',tiff:'🖼'}
 const getUplIcon=(name)=>UPL_ICONS[name.split('.').pop().toLowerCase()]||'📎'
 const fmtSize=(b)=>b<1024?`${b}B`:b<1048576?`${(b/1024).toFixed(1)}KB`:`${(b/1048576).toFixed(1)}MB`
+const ocrStatusText=(f)=>{
+  if(f.contentType!=='image')return''
+  if(f.text?.trim())return`OCR ${f.charCount}字${f.truncated?' [截断]':''}`
+  const status=f.ocrStatus||'not_applicable'
+  if(status==='disabled')return'OCR 已关闭'
+  if(status==='unavailable')return'OCR 不可用'
+  if(status==='timeout')return'OCR 超时'
+  if(status==='error')return'OCR 失败'
+  if(status==='empty')return'OCR 未识别到文字'
+  if(status==='degraded')return'OCR 部分可用'
+  return'OCR 待处理'
+}
+const uploadStatusText=(f)=>{
+  if(f.contentType==='image')return`${fmtSize(f.size)} · ${ocrStatusText(f)}`
+  return`${f.charCount}字${f.pageCount?` · ${f.pageCount}页`:''}${f.truncated?' [截断]':''}`
+}
 
 const doUpload=async(file)=>{
   const entry={id:Date.now()+Math.random(),name:file.name,ext:file.name.split('.').pop().toLowerCase(),
     icon:getUplIcon(file.name),size:file.size,loading:true,error:null,
-    contentType:null,text:null,base64:null,mediaType:null,charCount:0,pageCount:0,truncated:false}
+    contentType:null,text:null,base64:null,mediaType:null,charCount:0,pageCount:0,truncated:false,
+    ocrStatus:null,ocrLanguages:'',ocrMissingLanguages:[],ocrError:null}
   uploadedFiles.value=[...uploadedFiles.value,entry]
   try{
     const fd=new FormData();fd.append('file',file)
@@ -415,7 +432,9 @@ const doUpload=async(file)=>{
     if(!res.ok)throw new Error(apiError(d,res.status))
     Object.assign(entry,{loading:false,contentType:d.content_type,text:d.text,
       base64:d.image_base64,mediaType:d.image_media_type,
-      charCount:d.char_count,pageCount:d.page_count,truncated:d.truncated})
+      charCount:d.char_count,pageCount:d.page_count,truncated:d.truncated,
+      ocrStatus:d.ocr_status,ocrLanguages:d.ocr_languages,
+      ocrMissingLanguages:d.ocr_missing_languages||[],ocrError:d.ocr_error})
   }catch(e){entry.error=e.message;entry.loading=false}
   uploadedFiles.value=[...uploadedFiles.value]   // trigger reactivity
 }
@@ -572,17 +591,28 @@ const sendMessage=async()=>{
 
   // Build enriched question embedding file content
   const txtFiles=readyFiles.filter(f=>f.contentType==='text'&&f.text)
-  const imgFiles=readyFiles.filter(f=>f.contentType==='image'&&f.base64)
+  const imgFiles=readyFiles.filter(f=>f.contentType==='image')
   let fullQ=q
 
+  const ctxParts=[]
   if(txtFiles.length){
-    const ctx=txtFiles.map(f=>[
+    ctxParts.push(...txtFiles.map(f=>[
       `📎 文件: ${f.name}${f.pageCount?` (${f.pageCount}页)`:''} · ${f.charCount}字${f.truncated?' [已截断]':''}`,
       '─'.repeat(40),f.text,'─'.repeat(40)
-    ].join('\n')).join('\n\n')
-    fullQ=`${ctx}\n\n${q||'请结合以上文件内容和代码库回答问题。'}`
-  } else if(imgFiles.length){
-    fullQ=`${imgFiles.map(f=>`📎 图片: ${f.name} (${fmtSize(f.size)})`).join('\n')}\n\n${q||'请分析以上图片，结合代码库回答问题。'}`
+    ].join('\n')))
+  }
+  if(imgFiles.length){
+    ctxParts.push(...imgFiles.map(f=>{
+      const lines=[`📎 图片: ${f.name} (${fmtSize(f.size)}) · ${ocrStatusText(f)}`]
+      if(f.ocrLanguages)lines.push(`OCR 语言: ${f.ocrLanguages}`)
+      if(f.ocrMissingLanguages?.length)lines.push(`缺失 OCR 语言包: ${f.ocrMissingLanguages.join(', ')}`)
+      if(f.text?.trim())lines.push('─'.repeat(40),f.text,'─'.repeat(40))
+      else if(f.ocrError)lines.push(`OCR 说明: ${f.ocrError}`)
+      return lines.join('\n')
+    }))
+  }
+  if(ctxParts.length){
+    fullQ=`${ctxParts.join('\n\n')}\n\n${q||'请结合以上附件内容和代码库回答问题。'}`
   }
 
   const attachments=[...uploadedFiles.value]
@@ -595,7 +625,7 @@ const sendMessage=async()=>{
   chatMessages.value.push(aiMsg);twQ='';twMsg=null;await nextTick();scrollChat()
 
   const reqBody={repo_id:repoId.value,question:fullQ}
-  if(imgFiles.length)reqBody.images=imgFiles.map(f=>({base64:f.base64,media_type:f.mediaType,filename:f.name}))
+  if(imgFiles.length)reqBody.images=imgFiles.filter(f=>f.base64).map(f=>({base64:f.base64,media_type:f.mediaType,filename:f.name}))
 
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json',...(authToken.value?{Authorization:`Bearer ${authToken.value}`}:{})},body:JSON.stringify(reqBody)})
@@ -1192,7 +1222,7 @@ watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanv
               <span class="upl-st" v-if="f.loading">解析中…</span>
               <span class="upl-st upl-er" v-else-if="f.error">{{ f.error }}</span>
               <span class="upl-st upl-ok" v-else>
-                {{ f.contentType==='image' ? fmtSize(f.size) : `${f.charCount}字${f.pageCount?` · ${f.pageCount}页`:''}${f.truncated?' [截断]':''}` }}
+                {{ uploadStatusText(f) }}
               </span>
             </div>
             <img v-if="f.contentType==='image'&&f.base64&&!f.loading" :src="`data:${f.mediaType};base64,${f.base64}`" class="upl-thumb" alt=""/>

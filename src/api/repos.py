@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from src.ingestion.indexing import index_repository
+from src.ingestion import indexing
 
 
 router = APIRouter(prefix="/repos", tags=["repositories"])
@@ -28,11 +28,11 @@ def index_repository_endpoint(request: IndexRepositoryRequest):
     if not source:
         raise HTTPException(
             status_code=422,
-            detail="Either github_url or local_path must be provided.",
+            detail=[{"msg": "Either github_url or local_path must be provided."}],
         )
 
     try:
-        result = index_repository(source, branch=request.branch)
+        result = indexing.index_repository(source, branch=request.branch)
     except Exception as exc:
         logger.exception("Failed to index repository source=%s branch=%s", source, request.branch)
         detail = str(exc) or exc.__class__.__name__

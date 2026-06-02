@@ -34,6 +34,24 @@ def test_empty_file_produces_no_text_chunks():
     assert repository_file_to_documents("repo-1", repo_file) == []
 
 
+def test_image_reference_documents_keep_ocr_metadata():
+    repo_file = RepositoryFile(
+        path="docs/architecture.png",
+        content="Image asset found in repository: docs/architecture.png\n\nOCR text:\nService Map",
+        source_type="image_reference",
+        language=None,
+        metadata={"ocr_status": "ok", "ocr_languages": "eng", "ocr_char_count": 11},
+    )
+
+    docs = repository_file_to_documents("repo-1", repo_file)
+
+    assert len(docs) == 1
+    assert docs[0].page_content.endswith("Service Map")
+    assert docs[0].metadata["source_type"] == "image_reference"
+    assert docs[0].metadata["ocr_status"] == "ok"
+    assert docs[0].metadata["ocr_char_count"] == 11
+
+
 def test_repository_documents_include_project_overview_and_manifest():
     files = [
         RepositoryFile(

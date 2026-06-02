@@ -32,6 +32,11 @@ app.include_router(chat.router)
 app.include_router(repos.router)
 app.include_router(structure.router)
 app.include_router(upload.router)
+app.include_router(auth.router, prefix="/api")
+app.include_router(chat.router, prefix="/api")
+app.include_router(repos.router, prefix="/api")
+app.include_router(structure.router, prefix="/api")
+app.include_router(upload.router, prefix="/api")
 
 
 @app.get("/", tags=["system"])

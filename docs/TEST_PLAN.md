@@ -6,6 +6,7 @@
 1. **仓库索引模块** (`handleIndexRepo` / `index_repository_endpoint`)
 2. **问答模块** (`sendMessage` / `chat_endpoint`)
 3. **数据解析模块** (`readApiResponse`)
+4. **图片 OCR 模块** (`extract_image_text_from_bytes` / `upload_file`)
 
 ---
 
@@ -73,6 +74,22 @@
 | EC20 | 无效 | 格式错误 | `invalid-sse-format` |
 | EC21 | 无效 | 网络错误 | 连接超时/断开 |
 | EC22 | 有效 | 多行内容 | SSE中包含\n的数据 |
+
+#### 【功能3】图片 OCR 功能
+
+**输入参数：** 图片文件、`OCR_LANGS`、Tesseract 可用状态
+
+##### 等价类划分：
+
+| 等价类编号 | 有效/无效 | 描述 | 测试用例 |
+|--------|---------|------|---------|
+| EC23 | 有效 | Tesseract 和语言包可用 | 英文截图 |
+| EC24 | 有效 | 部分语言包缺失 | `OCR_LANGS=eng+chi_sim` 但仅安装 `eng` |
+| EC25 | 有效 | OCR 无识别文本 | 纯色图片 |
+| EC26 | 有效 | Tesseract 不存在 | 未安装系统 OCR |
+| EC27 | 有效 | OCR 超时 | 大图或命令卡住 |
+
+预期：所有 OCR 降级场景都不应阻断上传、仓库索引或问答，只返回明确 `ocr_status`。
 
 ---
 
@@ -795,4 +812,3 @@ npm run test:e2e            # 前端E2E测试
 | **Major** | 核心功能受损 | 流式响应中断 |
 | **Minor** | 功能可用但不完美 | 错误提示文案改进 |
 | **Trivial** | 界面/文案优化 | 按钮颜色调整 |
-

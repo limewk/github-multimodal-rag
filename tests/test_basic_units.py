@@ -320,8 +320,7 @@ class TestChatEndpoint:
     流式响应处理
     """
 
-    @pytest.mark.asyncio
-    async def test_tc_blk_015_normal_stream(self, monkeypatch):
+    def test_tc_blk_015_normal_stream(self, monkeypatch):
         """TC-BLK-015: 正常流式响应"""
         
         async def mock_stream(*args, **kwargs):

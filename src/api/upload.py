@@ -11,7 +11,12 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from src.processing.ocr import (
+    OCR_STATUS_NOT_APPLICABLE,
+    extract_image_text_from_bytes,
+)
 
 router = APIRouter(prefix="/upload", tags=["upload"])
 
@@ -46,6 +51,10 @@ class UploadResponse(BaseModel):
     char_count:       int             = 0
     page_count:       int             = 0
     truncated:        bool            = False
+    ocr_status:       str             = OCR_STATUS_NOT_APPLICABLE
+    ocr_languages:    str             = ""
+    ocr_missing_languages: list[str]  = Field(default_factory=list)
+    ocr_error:        Optional[str]   = None
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -57,7 +66,7 @@ async def upload_file(file: UploadFile = File(...)):
     """
     上传文件并提取内容：
     - PDF / Word / Markdown / TXT / CSV → 提取纯文本
-    - PNG / JPG / GIF / WebP / BMP     → Base64 编码（供视觉模型分析）
+    - PNG / JPG / GIF / WebP / BMP     → Base64 编码 + OCR 文本
     """
     filename = file.filename or "unnamed"
     ext      = Path(filename).suffix.lower()
@@ -78,12 +87,19 @@ async def upload_file(file: UploadFile = File(...)):
 
     # ── 图片 ─────────────────────────────────────────────────────
     if ext in IMAGE_EXTENSIONS:
+        ocr = extract_image_text_from_bytes(raw, suffix=ext)
         return UploadResponse(
             filename=filename, ext=ext.lstrip("."),
             content_type="image",
+            text=ocr.text or None,
             image_base64=base64.b64encode(raw).decode(),
             image_media_type=IMAGE_MIME.get(ext, "image/jpeg"),
-            char_count=len(raw),
+            char_count=ocr.char_count,
+            truncated=ocr.truncated,
+            ocr_status=ocr.status,
+            ocr_languages=ocr.languages,
+            ocr_missing_languages=list(ocr.missing_languages),
+            ocr_error=ocr.error,
         )
 
     # ── 文本文件 ──────────────────────────────────────────────────

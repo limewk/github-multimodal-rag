@@ -119,6 +119,29 @@ GITHUB_TOKEN=your_github_personal_access_token
 
 本地路径索引不会触发 GitHub Issues 读取。
 
+### 图片 OCR
+
+上传图片和仓库图片索引默认会调用系统 Tesseract OCR。OCR 不是 Python 依赖，需要目标系统安装 `tesseract` 命令和对应语言包。
+
+```env
+OCR_ENABLED=true
+OCR_LANGS=eng+chi_sim
+OCR_TESSERACT_CMD=tesseract
+OCR_TIMEOUT_SECONDS=20
+OCR_MAX_TEXT_CHARS=8000
+```
+
+安装示例：
+
+- macOS：`brew install tesseract`
+- Ubuntu/Debian：`apt-get install tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim`
+- Windows：安装 Tesseract OCR，并将 `OCR_TESSERACT_CMD` 设置为 `tesseract.exe` 的完整路径。
+- Docker：在镜像内安装 `tesseract-ocr`、`tesseract-ocr-eng`、`tesseract-ocr-chi-sim`。
+
+如果系统缺少 `chi_sim` 等语言包，服务会降级使用已安装语言；如果 Tesseract 不存在或 OCR 超时，上传、索引和问答仍会继续，只在返回字段和日志中标记 OCR 状态。
+
+无法安装系统 OCR 的 serverless 环境不适合直接使用本地 Tesseract，需要改用云 OCR 或视觉模型服务。
+
 ## 5. Qdrant 配置
 
 推荐本地文件模式，索引会持久化到项目目录：

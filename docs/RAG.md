@@ -25,7 +25,7 @@ GitHub URL / Local Path
 - `markdown`：Markdown 文件 chunk。
 - `text`：普通文本文件 chunk。
 - `issue`：GitHub open issue 内容，需要配置 `GITHUB_TOKEN`。
-- `image_reference`：图片文件或 Markdown 图片引用。
+- `image_reference`：图片文件、图片 OCR 文本或 Markdown 图片引用。
 - `repo_overview`：仓库级摘要，包含文件数、source type、语言分布、顶层目录。
 - `repo_manifest`：仓库文件清单，按固定大小分片。
 
@@ -46,6 +46,8 @@ GitHub URL / Local Path
   "end_line": 20
 }
 ```
+
+图片文件经过 OCR 后还会带上 `ocr_status`、`ocr_languages`、`ocr_missing_languages`、`ocr_truncated` 和 `ocr_char_count` 等字段。Tesseract 不可用、语言包缺失、超时或识别为空时不会中断索引，而是通过这些字段记录降级状态。
 
 这些字段用于：
 - 在 Qdrant 中隔离不同仓库。
@@ -127,6 +129,22 @@ RAG_MAX_TEXT_FILE_BYTES=1048576
 - `RAG_INDEX_BATCH_SIZE`：索引入库批大小。
 - `RAG_MAX_TEXT_FILE_BYTES`：单个文本文件最大读取字节数。
 
+图片 OCR 参数：
+
+```env
+OCR_ENABLED=true
+OCR_LANGS=eng+chi_sim
+OCR_TESSERACT_CMD=tesseract
+OCR_TIMEOUT_SECONDS=20
+OCR_MAX_TEXT_CHARS=8000
+```
+
+- `OCR_ENABLED`：是否启用上传图片和仓库图片 OCR。
+- `OCR_LANGS`：请求的 Tesseract 语言，默认中英文；缺失语言包时会降级到已安装语言。
+- `OCR_TESSERACT_CMD`：Tesseract 可执行文件名或完整路径。
+- `OCR_TIMEOUT_SECONDS`：单张图片 OCR 超时时间。
+- `OCR_MAX_TEXT_CHARS`：单张图片进入上下文或索引的 OCR 文本上限。
+
 ## 8. 调优建议
 
 - 回答缺少整体项目结构：提高 `RAG_REPO_CONTEXT_DOC_LIMIT`。
@@ -140,6 +158,6 @@ RAG_MAX_TEXT_FILE_BYTES=1048576
 - 关键词召回目前是轻量实现，不是完整 BM25。
 - 尚未使用 cross-encoder 或 LLM reranker。
 - 已有基础 AST chunk 元数据和代码结构接口，但导入关系、导出符号和真实调用链仍需增强。
-- 图片仍以引用和上下文为主，尚未做 OCR/VLM caption。
+- 图片已支持本地 OCR；复杂图表理解和 VLM caption 尚未接入。
 - 尚未提供检索调试接口，无法直接查看候选分数和重排过程。
 - 目前没有系统化评测集，难以量化每次检索策略调整的收益。
