@@ -3,9 +3,9 @@
 ## 一、项目概述
 
 ### 核心功能
-1. **仓库索引模块** (`handleProcess` / `index_repository_endpoint`)
-2. **问答模块** (`handleQuery` / `chat_endpoint`)
-3. **数据解析模块** (`readJsonResponse`)
+1. **仓库索引模块** (`handleIndexRepo` / `index_repository_endpoint`)
+2. **问答模块** (`sendMessage` / `chat_endpoint`)
+3. **数据解析模块** (`readApiResponse`)
 
 ---
 
@@ -85,10 +85,10 @@
 输入：repositorySource="https://github.com/pytorch/pytorch", branch="main"
 步骤：
   1. 填入仓库地址
-  2. 点击"开始分析仓库"
+  2. 点击"开始索引仓库"
   3. 等待索引完成
 期望结果：
-  - statusText显示 "索引完成：xxx chunks"
+  - repoStatus显示 "索引完成：xxx chunks"
   - repoId被正确赋值
   - 按钮恢复可用状态
 测试类型：功能测试
@@ -101,7 +101,7 @@
   2. 点击发送或按Enter
   3. 等待响应
 期望结果：
-  - responseText逐步显示模型回答
+  - AI 消息内容逐步显示模型回答
   - 消息气泡显示用户问题和助手回答
   - 最后显示 [DONE] 标记
 测试类型：功能测试、流式测试
@@ -113,7 +113,7 @@
 输入：repositorySource="", branch="main"
 步骤：
   1. 不输入仓库地址
-  2. 点击"开始分析"
+  2. 点击"开始索引"
 期望结果：
   - 不发送请求（前端验证）
   - 无错误消息显示（可选择添加提示）
@@ -122,7 +122,7 @@
 输入：repositorySource=超过2048字符的URL, branch="main"
 步骤：
   1. 输入过长的URL
-  2. 点击"开始分析"
+  2. 点击"开始索引"
 期望结果：
   - 要么截断，要么显示错误提示
   - 不导致前端崩溃
@@ -131,10 +131,10 @@
 输入：repositorySource="/nonexistent/repo/path", branch="main"
 步骤：
   1. 输入不存在的本地路径
-  2. 点击"开始分析"
+  2. 点击"开始索引"
 期望结果：
   - 后端返回404或400错误
-  - statusText显示 "❌ 找不到仓库" 或类似
+  - repoStatus显示 "❌ 找不到仓库" 或类似
   - repoId不被赋值
 ```
 
@@ -176,7 +176,7 @@
   1. 索引或问答时网络中断
 期望结果：
   - 显示错误信息
-  - statusText/responseText显示 "❌ ..."
+  - repoStatus/AI 消息内容显示 "❌ ..."
   - isIndexing/isAnswering恢复为false
   - UI可继续交互
 
@@ -195,7 +195,7 @@
   1. 调用API
   2. 后端返回空body
 期望结果：
-  - readJsonResponse返回 `{detail: "服务返回了空响应（HTTP xxx）"}`
+  - readApiResponse返回 `{detail: "服务返回了空响应（HTTP xxx）"}`
   - 显示用户友好的错误信息
 
 【TC-BLK-012】非JSON响应
@@ -222,7 +222,7 @@
 
 【TC-BLK-014】快速连续请求
 步骤：
-  1. 快速点击多次"开始分析"
+  1. 快速点击多次"开始索引"
   2. 快速连续发送多个问题
 期望结果：
   - 请求被防抖或节流
@@ -234,9 +234,9 @@
   1. 完成一次问答
   2. 点击"清空历史"按钮
 期望结果：
-  - chatHistory清空
-  - responseText清空
-  - retrievalSource清空
+  - chatMessages清空
+  - AI 消息内容清空
+  - msgSources清空
   - 可继续新提问
 ```
 
@@ -247,7 +247,7 @@
 步骤：
   1. 提问后等待SSE响应
 期望结果：
-  - responseText逐步追加
+  - AI 消息内容逐步追加
   - 用户可看到逐字显示效果
   - 最终显示完整回答
 
@@ -258,7 +258,7 @@
   2. 后端返回多行数据
 期望结果：
   - 正确解析多行内容
-  - responseText保留原始换行
+  - AI 消息内容保留原始换行
 
 【TC-BLK-018】SSE[DONE]标记处理
 条件：后端流式完成
@@ -276,7 +276,7 @@
 
 ### 3.1 代码流程分析与路径覆盖
 
-#### 【模块1】handleProcess 函数控制流
+#### 【模块1】handleIndexRepo 函数控制流
 
 ```
 START
@@ -286,7 +286,7 @@ START
   │  └─ NO → 继续
   │
   ├─ isIndexing = true
-  ├─ statusText = '正在构建索引...'
+  ├─ repoStatus = '正在构建索引...'
   │
   ├─ 条件2: repositorySource.startsWith('http')?
   │  ├─ YES → payload = { github_url, branch }
@@ -299,10 +299,10 @@ START
   │  └─ YES → 继续
   │
   ├─ repoId = data.repo_id
-  ├─ statusText = '索引完成：...'
+  ├─ repoStatus = '索引完成：...'
   │
   ├─ CATCH异常:
-  │  └─ statusText = error.message || '索引构建失败'
+  │  └─ repoStatus = error.message || '索引构建失败'
   │
   ├─ FINALLY:
   │  └─ isIndexing = false
@@ -332,7 +332,7 @@ END
 验证：
   - fetch 未被调用
   - isIndexing 保持false
-  - statusText 保持空
+  - repoStatus 保持空
 方法：Mock fetch，断言其未被调用
 
 【TC-WB-002】路径2：GitHub URL分支
@@ -345,7 +345,7 @@ END
   5. fetch 被调用，响应成功
 期望结果：
   - repoId 被正确赋值
-  - statusText 包含 "索引完成"
+  - repoStatus 包含 "索引完成"
   - isIndexing 恢复为false
 验证：Mock fetch返回成功响应
 
@@ -367,7 +367,7 @@ END
   2. throw Error 被触发
   3. catch块执行
 期望结果：
-  - statusText 包含 "❌"
+  - repoStatus 包含 "❌"
   - isAnswering 仍为false
   - 应用不崩溃
 验证：Mock fetch返回失败状态码
@@ -375,7 +375,7 @@ END
 
 ---
 
-#### 【模块2】handleQuery 函数控制流
+#### 【模块2】sendMessage 函数控制流
 
 ```
 START
@@ -385,7 +385,7 @@ START
   │  └─ NO → 继续
   │
   ├─ isAnswering = true
-  ├─ responseText = ''
+  ├─ AI 消息内容 = ''
   │
   ├─ FETCH /api/chat
   │
@@ -403,11 +403,11 @@ START
   │  │  └─ FOR每个event:
   │  │     ├─ 条件4: line.startsWith('data: ')?
   │  │     ├─ 条件5: data === '[DONE]'?
-  │  │     └─ responseText += data
+  │  │     └─ AI 消息内容 += data
   │  └─ UNTIL done
   │
   ├─ CATCH异常:
-  │  └─ responseText = error.message
+  │  └─ AI 消息内容 = error.message
   │
   ├─ FINALLY:
   │  └─ isAnswering = false
@@ -451,7 +451,7 @@ END
 预期：
   - fetch被调用
   - 进入catch块
-  - responseText = "...错误信息..."
+  - AI 消息内容 = "...错误信息..."
   - isAnswering = false
 
 【TC-WB-009】路径5：单chunk流式接收
@@ -461,7 +461,7 @@ Mock数据：
     {done: false, value: "data: Hello\n\n"}
     {done: true}
 预期：
-  - responseText = "Hello"
+  - AI 消息内容 = "Hello"
   - isAnswering = false
 
 【TC-WB-010】路径6：多chunk流式接收[DONE]
@@ -471,21 +471,21 @@ Mock数据：
   chunk2: "data: 一个\n\n"
   chunk3: "data: [DONE]\n\n"
 预期：
-  - responseText 逐步追加 "我是一个"
+  - AI 消息内容 逐步追加 "我是一个"
   - 接收[DONE]时停止
-  - 最终responseText = "我是一个"
+  - 最终AI 消息内容 = "我是一个"
 
 【TC-WB-011】路径7：流处理异常
 输入：流处理过程中reader.read()抛出异常
 预期：
   - catch块捕获异常
-  - responseText = 错误信息
+  - AI 消息内容 = 错误信息
   - isAnswering = false
 ```
 
 ---
 
-#### 【模块3】readJsonResponse 函数控制流
+#### 【模块3】readApiResponse 函数控制流
 
 ```
 START
@@ -648,19 +648,19 @@ END
 ### 4.1 前端单元测试框架
 
 ```javascript
-// tests/handleProcess.test.js
+// tests/handleIndexRepo.test.js
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref } from 'vue'
 
-describe('handleProcess', () => {
-  let repositorySource, branch, isIndexing, statusText, repoId
+describe('handleIndexRepo', () => {
+  let repositorySource, branch, isIndexing, repoStatus, repoId
   let fetchMock
 
   beforeEach(() => {
     repositorySource = ref('')
     branch = ref('main')
     isIndexing = ref(false)
-    statusText = ref('')
+    repoStatus = ref('')
     repoId = ref('')
     
     // Mock fetch
@@ -670,7 +670,7 @@ describe('handleProcess', () => {
 
   it('TC-WB-001: 应忽略空仓库源', () => {
     repositorySource.value = ''
-    handleProcess()
+    handleIndexRepo()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -687,10 +687,10 @@ describe('handleProcess', () => {
       })
     })
 
-    await handleProcess()
+    await handleIndexRepo()
     
     expect(repoId.value).toBe('test-123')
-    expect(statusText.value).toContain('索引完成')
+    expect(repoStatus.value).toContain('索引完成')
     expect(isIndexing.value).toBe(false)
   })
 

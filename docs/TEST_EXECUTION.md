@@ -38,7 +38,7 @@ npm run test -- --coverage    # 生成覆盖率
 
 #### 测试用例统计
 
-**功能1: 仓库索引 (handleProcess)**
+**功能1: 仓库索引 (handleIndexRepo)**
 
 | 测试用例ID | 等价类 | 描述 | 预期结果 | 状态 |
 |-----------|-------|------|--------|------|
@@ -52,7 +52,7 @@ npm run test -- --coverage    # 生成覆盖率
 | TC-BLK-008 | 边界 | 超长URL(>2048) | 拒绝或截断 | ◻ |
 | TC-BLK-009 | EC7-9 | 分支名处理 | 使用指定分支 | ◻ |
 
-**功能2: 问答功能 (handleQuery)**
+**功能2: 问答功能 (sendMessage)**
 
 | 测试用例ID | 等价类 | 描述 | 预期结果 | 状态 |
 |-----------|-------|------|--------|------|
@@ -145,7 +145,7 @@ pytest tests/test_basic_units.py -v --cov=src --cov-report=html
 
 ### 3.1 前端白盒测试（基本路径法）
 
-#### readJsonResponse 函数分析
+#### readApiResponse 函数分析
 - **圈复杂度**: 2
 - **基本路径数**: 3
 
@@ -164,7 +164,7 @@ pytest tests/test_basic_units.py -v --cov=src --cov-report=html
 | 路径2 | TC-WB-014 | text='{"status":"ok"}' | 返回JSON对象 | ◻ |
 | 路径3 | TC-WB-015 | text="invalid" | 返回原文本作为detail | ◻ |
 
-#### handleProcess 函数分析
+#### handleIndexRepo 函数分析
 - **圈复杂度**: 4
 - **基本路径数**: 4
 
@@ -180,9 +180,9 @@ pytest tests/test_basic_units.py -v --cov=src --cov-report=html
 | 路径1 | TC-WB-001 | repositorySource="" | fetch未调用 | ◻ |
 | 路径2 | TC-WB-002 | GitHub URL, 响应成功 | repoId被赋值 | ◻ |
 | 路径3 | TC-WB-003 | 本地路径, 响应成功 | payload含local_path | ◻ |
-| 路径4 | TC-WB-004 | 任何源, 响应失败 | statusText含错误 | ◻ |
+| 路径4 | TC-WB-004 | 任何源, 响应失败 | repoStatus含错误 | ◻ |
 
-#### handleQuery 函数分析
+#### sendMessage 函数分析
 - **圈复杂度**: 7
 - **基本路径数**: 7
 
@@ -202,7 +202,7 @@ pytest tests/test_basic_units.py -v --cov=src --cov-report=html
 | 路径2 | TC-WB-006 | repoId="" | fetch未调用 | ◻ |
 | 路径3 | TC-WB-007 | isAnswering=true | fetch未调用 | ◻ |
 | 路径4 | TC-WB-008 | response.ok=false | 进入catch | ◻ |
-| 路径5 | TC-WB-009 | 单chunk + done | responseText=data | ◻ |
+| 路径5 | TC-WB-009 | 单chunk + done | AI 消息内容=data | ◻ |
 | 路径6 | TC-WB-010 | 多chunk + [DONE] | 正确追加&停止 | ◻ |
 | 路径7 | TC-WB-011 | 流异常 | 异常被捕获 | ◻ |
 
@@ -295,7 +295,7 @@ pytest tests/test_basic_units.py --cov=src --cov-report=html
 测试用例: TC-BLK-004
 重现步骤: 
   1. 在仓库地址输入框输入无效URL格式
-  2. 点击"开始分析"
+  2. 点击"开始索引"
 预期结果: 显示"格式错误"提示
 实际结果: 发送请求，后端500错误
 根本原因: 前端未验证URL格式
@@ -307,7 +307,7 @@ pytest tests/test_basic_units.py --cov=src --cov-report=html
 测试用例: TC-BLK-017
 重现步骤: 后端返回格式错误的SSE
 预期结果: 显示错误提示
-实际结果: responseText显示乱码
+实际结果: AI 消息内容显示乱码
 根本原因: SSE解析逻辑缺陷
 ```
 

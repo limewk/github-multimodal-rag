@@ -41,10 +41,45 @@ const uploadedFiles=ref([])   // {id,name,ext,icon,size,loading,error,contentTyp
 const isDragOver=ref(false)
 const fileInputRef=ref(null)
 
+// ─── Chat history state ─────────────────────────────────────────
+const HIST_KEY='cc_chat_history'
+const MAX_SESSIONS=60
+const showHistory=ref(false)
+const histSessions=ref([])
+const currentSessionId=ref(null)
+const histSearch=ref('')
+
 // ── Computed ────────────────────────────────────────────────────
 const pwdStr=computed(()=>{const p=regForm.password;if(!p)return 0;return[p.length>=8,p.length>=12,/[A-Z]/.test(p),/[0-9]/.test(p),/[^A-Za-z0-9]/.test(p)].filter(Boolean).length})
 const pwdLbl=computed(()=>['','很弱','弱','中等','强','很强'][pwdStr.value]||'')
 const pwdClr=computed(()=>['','#f87171','#fb923c','#facc15','#4ade80','#00FFD4'][pwdStr.value])
+
+const filteredSessions=computed(()=>{
+  const q=histSearch.value.trim().toLowerCase()
+  if(!q)return histSessions.value
+  return histSessions.value.filter(s=>
+    (s.title||'').toLowerCase().includes(q)||
+    (s.repoUrl||s.repoId||'').toLowerCase().includes(q)
+  )
+})
+
+const groupedHistory=computed(()=>{
+  const DAY=86400000,now=Date.now()
+  const groups=[
+    {label:'今天',items:[]},
+    {label:'昨天',items:[]},
+    {label:'最近 7 天',items:[]},
+    {label:'更早',items:[]},
+  ]
+  filteredSessions.value.forEach(s=>{
+    const age=now-(Number(s.updatedAt)||0)
+    if(age<DAY)groups[0].items.push(s)
+    else if(age<DAY*2)groups[1].items.push(s)
+    else if(age<DAY*7)groups[2].items.push(s)
+    else groups[3].items.push(s)
+  })
+  return groups.filter(g=>g.items.length)
+})
 
 const flatTree=computed(()=>{
   if(!structureData.value?.files)return[]
@@ -171,7 +206,7 @@ const handleLogout=()=>{authToken.value='';currentUser.value=null;localStorage.r
 
 // ── Repo ────────────────────────────────────────────────────────
 const clearAll=()=>{
-  chatMessages.value=[];msgSources.value={};structureData.value=null;selectedChunk.value=null
+  chatMessages.value=[];msgSources.value={};currentSessionId.value=null;structureData.value=null;selectedChunk.value=null
   selectedFile.value=null;previewFile.value=null;expandedDirs.value=new Set();expandedFiles.value=new Set()
   simNodes=[];simEdges=[];callNodes=[];callEdges=[]
   if(animFrame){cancelAnimationFrame(animFrame);animFrame=null}
@@ -571,7 +606,120 @@ const sendMessage=async()=>{
     const srcs=extractSources(aiMsg.raw);aiMsg.sources=srcs;msgSources.value[aiMsg.id]=srcs
     aiMsg.raw=stripSourceBlock(aiMsg.raw);aiMsg.html=renderMD(aiMsg.raw)
   }catch(e){aiMsg.raw=e.message||'服务异常';aiMsg.html=renderMD(aiMsg.raw)}
-  finally{aiMsg.streaming=false;isAnswering.value=false;await nextTick();scrollChat()}
+  finally{aiMsg.streaming=false;isAnswering.value=false;await nextTick();scrollChat();saveCurrentSession()}
+}
+
+// ── Chat history ────────────────────────────────────────────────
+const fmtDate=(ts)=>{
+  const diff=(Date.now()-(Number(ts)||0))/1000
+  if(diff<60)return'刚刚'
+  if(diff<3600)return`${Math.floor(diff/60)}分钟前`
+  if(diff<86400)return`${Math.floor(diff/3600)}小时前`
+  if(diff<172800)return'昨天'
+  return new Date(ts).toLocaleDateString('zh-CN',{month:'short',day:'numeric'})
+}
+
+const loadHistory=()=>{
+  try{
+    const raw=localStorage.getItem(HIST_KEY)
+    const parsed=raw?JSON.parse(raw):[]
+    histSessions.value=Array.isArray(parsed)?parsed.filter(s=>s?.id&&s?.repoId&&Array.isArray(s.messages)):[]
+  }catch{histSessions.value=[]}
+}
+
+const persistHistory=()=>{
+  try{localStorage.setItem(HIST_KEY,JSON.stringify(histSessions.value))}
+  catch(e){
+    if(e?.name==='QuotaExceededError'){
+      histSessions.value=histSessions.value.slice(0,Math.floor(MAX_SESSIONS/2))
+      try{localStorage.setItem(HIST_KEY,JSON.stringify(histSessions.value))}catch{}
+    }
+  }
+}
+
+const saveCurrentSession=()=>{
+  if(!chatMessages.value.length||!repoId.value)return
+  const now=Date.now()
+  const firstUserMsg=chatMessages.value.find(m=>m.role==='user')?.content||'新对话'
+  const title=firstUserMsg.slice(0,50)+(firstUserMsg.length>50?'…':'')
+  const sid=currentSessionId.value||(currentSessionId.value=`s_${now}_${Math.random().toString(36).slice(2,7)}`)
+  const old=histSessions.value.find(s=>s.id===sid)
+  const messages=chatMessages.value.map(m=>({
+    id:m.id,
+    role:m.role,
+    content:m.role==='assistant'?(m.raw||m.content||''):(m.content||''),
+    sources:m.sources||[],
+    attachments:(m.attachments||[]).map(a=>({
+      id:a.id,name:a.name,ext:a.ext,icon:a.icon,size:a.size,
+      contentType:a.contentType,charCount:a.charCount,pageCount:a.pageCount,
+      base64:(a.base64&&a.base64.length<270000)?a.base64:null,
+      mediaType:a.mediaType
+    }))
+  }))
+  const session={
+    id:sid,
+    repoId:repoId.value,
+    repoUrl:repoUrl.value,
+    title,
+    msgCount:chatMessages.value.length,
+    createdAt:old?.createdAt||now,
+    updatedAt:now,
+    messages
+  }
+  const idx=histSessions.value.findIndex(s=>s.id===sid)
+  if(idx>=0)histSessions.value[idx]=session
+  else histSessions.value.unshift(session)
+  histSessions.value=[...histSessions.value].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,MAX_SESSIONS)
+  persistHistory()
+}
+
+const resetRepoVisualState=()=>{
+  structureData.value=null;selectedChunk.value=null;selectedFile.value=null;previewFile.value=null
+  expandedDirs.value=new Set();expandedFiles.value=new Set()
+  simNodes=[];simEdges=[];callNodes=[];callEdges=[]
+  graphTooltip.value=null;callTooltip.value=null;graphStats.nodes=0;graphStats.edges=0
+  if(animFrame){cancelAnimationFrame(animFrame);animFrame=null}
+  if(callFrame){cancelAnimationFrame(callFrame);callFrame=null}
+}
+
+const loadSession=(session)=>{
+  const repoChanged=repoId.value!==session.repoId
+  currentSessionId.value=session.id
+  repoId.value=session.repoId
+  if(session.repoUrl)repoUrl.value=session.repoUrl
+  if(repoChanged)resetRepoVisualState()
+  repoStatus.value='✅ 历史记录已加载'
+  chatMessages.value=(session.messages||[]).map(m=>({
+    ...m,
+    raw:m.role==='assistant'?(m.content||''):'',
+    html:m.role==='assistant'?renderMD(m.content||''):'',
+    streaming:false
+  }))
+  msgSources.value={}
+  ;(session.messages||[]).filter(m=>m.sources?.length).forEach(m=>{msgSources.value[m.id]=m.sources})
+  showHistory.value=false
+  nextTick(scrollChat)
+}
+
+const deleteSession=(id,e)=>{
+  e?.stopPropagation()
+  histSessions.value=histSessions.value.filter(s=>s.id!==id)
+  if(currentSessionId.value===id){currentSessionId.value=null;chatMessages.value=[];msgSources.value={}}
+  persistHistory()
+}
+
+const clearAllHistory=()=>{
+  if(!confirm('确定要清空全部历史记录吗？'))return
+  histSessions.value=[];currentSessionId.value=null;chatMessages.value=[];msgSources.value={}
+  localStorage.removeItem(HIST_KEY)
+}
+
+const startNewChat=()=>{
+  currentSessionId.value=null
+  chatMessages.value=[]
+  msgSources.value={}
+  uploadedFiles.value=[]
+  showHistory.value=false
 }
 
 // ── Lifecycle ───────────────────────────────────────────────────
@@ -581,6 +729,7 @@ const loadLibs=()=>{
 }
 onMounted(()=>{
   loadLibs()
+  loadHistory()
   const tok=localStorage.getItem('auth_token'),usr=localStorage.getItem('auth_user')
   if(tok&&usr)try{authToken.value=tok;currentUser.value=JSON.parse(usr);currentView.value='main'}catch{handleLogout()}
   resizeObs=new ResizeObserver(()=>{const w=kgWrapRef.value,cv=canvasRef.value;if(!w||!cv)return;cv.width=w.clientWidth;cv.height=Math.max(380,w.clientHeight-56);if(simNodes.length)drawKG(cv)})
@@ -905,9 +1054,54 @@ watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanv
         <span v-if="repoId" class="repo-pill">{{ repoId.slice(0,44) }}{{ repoId.length>44?'…':'' }}</span>
         <div class="pa">
           <span v-if="uploadedFiles.length" class="att-count">📎 {{ uploadedFiles.length }} 个文件待发送</span>
-          <button v-if="chatMessages.length" class="btn-sm" @click="chatMessages=[];msgSources.value={}">清空</button>
+          <button class="btn-sm" :class="showHistory&&'btn-sm-on'" @click="showHistory=!showHistory" title="历史记录">
+            🕐 历史{{ histSessions.length?` (${histSessions.length})`:'' }}
+          </button>
+          <button v-if="chatMessages.length" class="btn-sm" :disabled="isAnswering" @click="startNewChat">＋ 新对话</button>
+          <button v-if="chatMessages.length" class="btn-sm" :disabled="isAnswering" @click="startNewChat">清空</button>
         </div>
       </div>
+      <transition name="hist-slide">
+        <div v-if="showHistory" class="hist-panel">
+          <div class="hist-head">
+            <span class="hist-title">🕐 历史记录</span>
+            <button class="hist-new" :disabled="isAnswering" @click="startNewChat">＋ 新对话</button>
+            <button v-if="histSessions.length" class="hist-clear" @click="clearAllHistory" title="清空全部">🗑</button>
+            <button class="hist-close" @click="showHistory=false">✕</button>
+          </div>
+          <div class="hist-search-wrap">
+            <input v-model="histSearch" class="hist-search" placeholder="🔍 搜索历史…"/>
+          </div>
+          <div class="hist-body">
+            <div v-if="!histSessions.length" class="hist-empty">
+              <span style="font-size:36px;opacity:.35">🕐</span>
+              <p>暂无历史记录</p>
+              <p style="font-size:11px;color:var(--t3)">发送消息后自动保存</p>
+            </div>
+            <div v-else-if="!filteredSessions.length" class="hist-empty">
+              <p>未找到匹配的对话</p>
+            </div>
+            <template v-for="group in groupedHistory" :key="group.label">
+              <div class="hist-group-label">{{ group.label }}</div>
+              <button v-for="s in group.items" :key="s.id"
+                :class="['hist-item', currentSessionId===s.id&&'active']"
+                @click="loadSession(s)">
+                <div class="hi-top">
+                  <span class="hi-title">{{ s.title }}</span>
+                  <span class="hi-del" @click="deleteSession(s.id,$event)" title="删除">✕</span>
+                </div>
+                <div class="hi-meta">
+                  <span class="hi-repo" :title="s.repoUrl||s.repoId">{{ (s.repoUrl||s.repoId||'').split('/').slice(-1)[0]||s.repoId }}</span>
+                  <span class="hi-dot">·</span>
+                  <span>{{ s.msgCount }} 条</span>
+                  <span class="hi-dot">·</span>
+                  <span>{{ fmtDate(s.updatedAt) }}</span>
+                </div>
+              </button>
+            </template>
+          </div>
+        </div>
+      </transition>
       <div v-if="!repoId" class="empty"><div class="eic">💬</div><p>请先索引仓库，再开始问答</p></div>
       <div v-else class="chat-body" @click="onChatClick"
            @dragover.prevent="isDragOver=true" @dragleave.self="isDragOver=false" @drop="onDrop">
@@ -1239,7 +1433,7 @@ button,input,select,textarea{font-family:var(--fu)}
 .cg-wrap{flex:1;position:relative;overflow:hidden;display:flex;flex-direction:column}
 
 /* ── CHAT ── */
-.chat-panel{display:flex;flex-direction:column}
+.chat-panel{display:flex;flex-direction:column;position:relative}
 .chat-body{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:12px}
 .chat-wel{padding:30px 0;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
 .wt{font-family:var(--fd);font-size:20px;font-weight:700;background:linear-gradient(135deg,var(--t0),var(--p));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
@@ -1348,6 +1542,37 @@ button,input,select,textarea{font-family:var(--fu)}
 .sp.xs{width:11px;height:11px;border-width:1.5px}.sp.lg{width:32px;height:32px;border-width:3px;color:var(--p)}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ── HISTORY PANEL ── */
+.btn-sm-on{border-color:var(--p)!important;color:var(--p)!important;background:var(--p1)!important}
+.hist-panel{position:absolute;top:0;right:0;bottom:0;width:308px;background:rgba(3,8,15,.96);backdrop-filter:blur(18px);border-left:1px solid var(--bd2);z-index:30;display:flex;flex-direction:column;box-shadow:-12px 0 40px rgba(0,0,0,.5)}
+.hist-slide-enter-active,.hist-slide-leave-active{transition:transform .22s cubic-bezier(.4,0,.2,1),opacity .22s}
+.hist-slide-enter-from,.hist-slide-leave-to{transform:translateX(100%);opacity:0}
+.hist-head{display:flex;align-items:center;gap:8px;padding:13px 14px 10px;border-bottom:1px solid var(--bd);flex-shrink:0}
+.hist-title{font-family:var(--fd);font-size:15px;font-weight:700;color:var(--t0);flex:1}
+.hist-new{background:linear-gradient(135deg,rgba(0,255,212,.15),rgba(129,140,248,.08));border:1px solid var(--bd2);color:var(--p);padding:4px 10px;border-radius:6px;font-size:11.5px;cursor:pointer;font-weight:600;transition:var(--tr)}
+.hist-new:hover{box-shadow:0 0 10px var(--p1)}
+.hist-new:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
+.hist-clear,.hist-close{background:none;border:none;color:var(--t3);cursor:pointer;font-size:15px;padding:3px 6px;border-radius:5px;transition:var(--tr)}
+.hist-clear:hover{color:var(--er);background:rgba(248,113,113,.1)}
+.hist-close:hover{color:var(--t1);background:var(--bg3)}
+.hist-search-wrap{padding:10px 12px 6px;flex-shrink:0}
+.hist-search{width:100%;background:var(--bg3);border:1px solid var(--bd);border-radius:var(--rs);color:var(--t1);font-size:12.5px;padding:7px 11px;outline:none;transition:var(--tr)}
+.hist-search:focus{border-color:var(--p)}
+.hist-body{flex:1;overflow-y:auto;padding:4px 0 12px}
+.hist-empty{display:flex;flex-direction:column;align-items:center;gap:8px;padding:36px 20px;color:var(--t2);text-align:center;font-size:13px}
+.hist-group-label{padding:8px 14px 4px;font-size:10.5px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.6px}
+.hist-item{width:100%;text-align:left;background:none;border:none;border-radius:0;padding:9px 14px;cursor:pointer;transition:var(--tr);border-bottom:1px solid rgba(255,255,255,.03);display:flex;flex-direction:column;gap:4px}
+.hist-item:hover{background:var(--bg3)}
+.hist-item.active{background:var(--p1);border-left:3px solid var(--p);padding-left:11px}
+.hi-top{display:flex;align-items:flex-start;gap:6px}
+.hi-title{font-size:12.5px;font-weight:500;color:var(--t0);flex:1;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.hi-del{flex-shrink:0;background:none;border:none;color:var(--t3);cursor:pointer;font-size:12px;padding:1px 4px;border-radius:4px;opacity:0;transition:var(--tr);margin-top:1px}
+.hist-item:hover .hi-del{opacity:1}
+.hi-del:hover{color:var(--er);background:rgba(248,113,113,.12)}
+.hi-meta{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--t3);flex-wrap:nowrap;overflow:hidden}
+.hi-repo{color:var(--v);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px;font-family:var(--fm);font-size:10px}
+.hi-dot{opacity:.4}
+
 /* ── RESPONSIVE ── */
 @media(max-width:768px){
   :root{--sw:50px}
@@ -1356,6 +1581,7 @@ button,input,select,textarea{font-family:var(--fu)}
   .sb-usr{justify-content:center;padding:8px}
   .str-lay,.pv-lay{flex-direction:column}
   .str-tree,.pv-tree{width:100%;min-width:0;max-height:150px;border-right:none;border-bottom:1px solid var(--bd)}
+  .hist-panel{width:min(320px,calc(100vw - var(--sw)))}
   .auth-card{width:calc(100vw - 24px);padding:24px 16px}
 }
 </style>
