@@ -122,12 +122,22 @@ const metricsData=computed(()=>{
 })
 
 // ── API ─────────────────────────────────────────────────────────
+const readApiResponse=async(res)=>{
+  const txt=await res.text()
+  if(!txt.trim())return{}
+  try{return JSON.parse(txt)}
+  catch{return{detail:txt}}
+}
+const apiError=(data,status)=>Array.isArray(data.detail)
+  ?data.detail.map(e=>e.msg||JSON.stringify(e)).join('\n')
+  :data.detail||data.message||`请求失败（HTTP ${status}）`
+
 const api=async(path,opts={})=>{
   const h={'Content-Type':'application/json',...(opts.headers||{})}
   if(authToken.value)h['Authorization']=`Bearer ${authToken.value}`
   const res=await fetch(`/api${path}`,{...opts,headers:h})
-  const txt=await res.text();const d=txt?JSON.parse(txt):{}
-  if(!res.ok)throw new Error(Array.isArray(d.detail)?d.detail.map(e=>e.msg||JSON.stringify(e)).join('\n'):d.detail||`Error ${res.status}`)
+  const d=await readApiResponse(res)
+  if(!res.ok)throw new Error(apiError(d,res.status))
   return d
 }
 
@@ -365,9 +375,9 @@ const doUpload=async(file)=>{
   uploadedFiles.value=[...uploadedFiles.value,entry]
   try{
     const fd=new FormData();fd.append('file',file)
-    const res=await fetch('/api/upload',{method:'POST',headers:authToken.value?{Authorization:`Bearer ${authToken.value}`}:{},body:fd})
-    const d=await res.json()
-    if(!res.ok)throw new Error(d.detail||'上传失败')
+    const res=await fetch('/api/upload/',{method:'POST',headers:authToken.value?{Authorization:`Bearer ${authToken.value}`}:{},body:fd})
+    const d=await readApiResponse(res)
+    if(!res.ok)throw new Error(apiError(d,res.status))
     Object.assign(entry,{loading:false,contentType:d.content_type,text:d.text,
       base64:d.image_base64,mediaType:d.image_media_type,
       charCount:d.char_count,pageCount:d.page_count,truncated:d.truncated})
@@ -424,6 +434,11 @@ const extractSources=(text)=>{
 
   return Object.values(res).sort((a,b)=>a.n-b.n)
 }
+
+const stripSourceBlock=(text='')=>text.replace(
+  /\n{0,2}(?:来源|Sources?|参考(?:文献|资料)?|References?)[：:\s]*\n(?:\[?\d+\]?[^\n]+\n?)+\s*$/i,
+  ''
+).trim()
 
 // ── Jump to source: async, reactive Set updates, multi-strategy match ──
 const jumpToSource=async(src)=>{
@@ -549,11 +564,12 @@ const sendMessage=async()=>{
 
   try{
     const res=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json',...(authToken.value?{Authorization:`Bearer ${authToken.value}`}:{})},body:JSON.stringify(reqBody)})
-    if(!res.ok||!res.body){const er=await res.json();aiMsg.raw=er.detail||'请求失败';aiMsg.html=renderMD(aiMsg.raw);return}
+    if(!res.ok||!res.body){const er=await readApiResponse(res);aiMsg.raw=apiError(er,res.status);aiMsg.html=renderMD(aiMsg.raw);return}
     const reader=res.body.getReader(),dec=new TextDecoder();let buf=''
     while(true){const{done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});const evts=buf.split('\n\n');buf=evts.pop()||'';for(const evt of evts){const txt=evt.split('\n').filter(l=>l.startsWith('data: ')).map(l=>l.slice(6)).join('\n');if(txt==='[DONE]')break;queueTW(aiMsg,txt)}}
     await new Promise(r=>{const ck=()=>{if(!twQ.length&&!twRaf)r();else setTimeout(ck,40)};ck()})
     const srcs=extractSources(aiMsg.raw);aiMsg.sources=srcs;msgSources.value[aiMsg.id]=srcs
+    aiMsg.raw=stripSourceBlock(aiMsg.raw);aiMsg.html=renderMD(aiMsg.raw)
   }catch(e){aiMsg.raw=e.message||'服务异常';aiMsg.html=renderMD(aiMsg.raw)}
   finally{aiMsg.streaming=false;isAnswering.value=false;await nextTick();scrollChat()}
 }
@@ -929,37 +945,43 @@ watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanv
               <div v-else class="mbub ai-b">
                 <div class="mdc-wrap" v-html="msg.html||renderMD(msg.raw||msg.content||'')"></div>
                 <span v-if="msg.streaming" class="tcur">▌</span>
-                <div v-if="!msg.streaming&&msg.sources&&msg.sources.length" class="src-panel">
-                  <div class="src-hd">📎 引用来源 <span class="src-cnt">{{ msg.sources.length }} 个</span></div>
-                  <div class="src-grid">
-                    <button v-for="src in msg.sources" :key="src.n" class="src-card" @click.stop="jumpToSource(src)">
-                      <span class="src-num">[{{ src.n }}]</span>
-                      <div class="src-info">
-                        <span class="src-path">{{ src.path.split('/').pop() }}</span>
-                        <span class="src-full">{{ src.path }}</span>
-                        <span v-if="src.sl" class="src-lines">第 {{ src.sl }}–{{ src.el }} 行</span>
-                      </div>
-                      <span class="src-go">→ 跳转</span>
-                    </button>
-                  </div>
-                  <details class="flow-det">
-                    <summary class="flow-sum">⚡ 检索链路详情</summary>
-                    <div class="flow-body">
-                      <div class="fn fn-q">❓ {{ chatMessages[chatMessages.indexOf(msg)-1]?.content?.slice(0,80) }}{{ chatMessages[chatMessages.indexOf(msg)-1]?.content?.length>80?'…':'' }}</div>
-                      <div class="farr">↓ 向量语义检索 + 关键词匹配</div>
-                      <div class="fn-srcs">
-                        <div v-for="s in msg.sources" :key="s.n" class="fn-src" @click="jumpToSource(s)" style="cursor:pointer">
-                          <span class="src-num sm">[{{ s.n }}]</span>
-                          <span class="fn-path">{{ s.path }}</span>
-                          <span v-if="s.sl" class="fn-ln">行 {{ s.sl }}-{{ s.el }}</span>
-                          <span class="fn-jmp">→</span>
+                <details v-if="!msg.streaming&&msg.sources&&msg.sources.length" class="src-panel">
+                  <summary class="src-summary">
+                    <span class="src-title">引用来源</span>
+                    <span class="src-cnt">{{ msg.sources.length }} 个</span>
+                    <span class="src-tip">展开查看并跳转代码片段</span>
+                  </summary>
+                  <div class="src-content">
+                    <div class="src-grid">
+                      <button v-for="src in msg.sources" :key="src.n" class="src-card" @click.stop="jumpToSource(src)">
+                        <span class="src-num">[{{ src.n }}]</span>
+                        <div class="src-info">
+                          <span class="src-path">{{ src.path.split('/').pop() }}</span>
+                          <span class="src-full">{{ src.path }}</span>
+                          <span v-if="src.sl" class="src-lines">第 {{ src.sl }}–{{ src.el }} 行</span>
                         </div>
-                      </div>
-                      <div class="farr">↓ LLM 上下文增强生成</div>
-                      <div class="fn fn-ans">💡 基于 {{ msg.sources.length }} 个代码片段生成答案</div>
+                        <span class="src-go">→ 跳转</span>
+                      </button>
                     </div>
-                  </details>
-                </div>
+                    <details class="flow-det">
+                      <summary class="flow-sum">检索链路详情</summary>
+                      <div class="flow-body">
+                        <div class="fn fn-q">问题：{{ chatMessages[chatMessages.indexOf(msg)-1]?.content?.slice(0,80) }}{{ chatMessages[chatMessages.indexOf(msg)-1]?.content?.length>80?'…':'' }}</div>
+                        <div class="farr">向量语义检索 + 关键词匹配</div>
+                        <div class="fn-srcs">
+                          <div v-for="s in msg.sources" :key="s.n" class="fn-src" @click="jumpToSource(s)" style="cursor:pointer">
+                            <span class="src-num sm">[{{ s.n }}]</span>
+                            <span class="fn-path">{{ s.path }}</span>
+                            <span v-if="s.sl" class="fn-ln">行 {{ s.sl }}-{{ s.el }}</span>
+                            <span class="fn-jmp">→</span>
+                          </div>
+                        </div>
+                        <div class="farr">LLM 上下文增强生成</div>
+                        <div class="fn fn-ans">基于 {{ msg.sources.length }} 个代码片段生成答案</div>
+                      </div>
+                    </details>
+                  </div>
+                </details>
               </div>
             </div>
           </div>
@@ -1250,9 +1272,16 @@ button,input,select,textarea{font-family:var(--fu)}
 .mdc-wrap .mcite{cursor:pointer;color:var(--p);font-size:10px;font-weight:700;padding:0 2px;transition:var(--tr);text-decoration:underline;text-underline-offset:2px}.mdc-wrap .mcite:hover{color:var(--t0)}
 .mdc-wrap strong{color:var(--t0)}.mdc-wrap em{color:var(--v)}
 /* Source panel */
-.src-panel{margin-top:10px;padding-top:10px;border-top:1px solid var(--bd);display:flex;flex-direction:column;gap:8px}
-.src-hd{font-size:11px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center;gap:6px}
+.src-panel{margin-top:9px;padding-top:8px;border-top:1px solid var(--bd)}
+.src-summary{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:var(--rs);cursor:pointer;list-style:none;user-select:none;color:var(--t2);transition:var(--tr);font-size:11.5px}
+.src-summary:hover{background:var(--bg3);color:var(--t1)}
+.src-summary::-webkit-details-marker{display:none}
+.src-summary::before{content:'▸';color:var(--p);font-size:10px;transition:var(--tr)}
+.src-panel[open] .src-summary::before{transform:rotate(90deg)}
+.src-title{font-weight:700;color:var(--t1)}
 .src-cnt{background:var(--bg3);border-radius:10px;padding:1px 7px;font-size:10px;color:var(--t2)}
+.src-tip{margin-left:auto;color:var(--t3);font-size:10.5px}
+.src-content{display:flex;flex-direction:column;gap:8px;padding:7px 0 0}
 .src-grid{display:flex;flex-direction:column;gap:5px}
 .src-card{display:flex;align-items:center;gap:9px;background:var(--bg3);border:1px solid var(--bd);border-radius:8px;padding:8px 11px;cursor:pointer;transition:var(--tr);text-align:left;width:100%}
 .src-card:hover{border-color:var(--p);background:var(--p1);transform:translateX(3px)}

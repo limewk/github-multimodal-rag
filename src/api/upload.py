@@ -51,6 +51,7 @@ class UploadResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────
 # Endpoint
 # ─────────────────────────────────────────────────────────────────
+@router.post("", response_model=UploadResponse, include_in_schema=False)
 @router.post("/", response_model=UploadResponse, summary="上传并解析文件")
 async def upload_file(file: UploadFile = File(...)):
     """
