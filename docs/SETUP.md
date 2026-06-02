@@ -1,131 +1,173 @@
-# 项目环境配置指南 (Environment Setup Guide)
+# 环境配置指南
 
-本文档旨在帮助团队成员（及后续开发者）快速在本地搭建“面向 GitHub 仓库的多模态RAG智能问答系统”的开发环境。本系统采用前后端分离架构：后端基于 Python (FastAPI + LangChain)，前端基于 Node.js (Vue 3 + Vite)。
+本文档说明如何在本地运行 GitHub 多模态 RAG 智能问答系统。
 
-## 1. 前置开发依赖 (Prerequisites)
-在开始配置之前，请确保您的计算机上已安装以下软件：
-- **Python**: 3.10 或更高版本。
-- **Node.js**: 18.0 或更高版本 (建议使用 LTS 版本)。
-- **Git**: 用于版本控制和代码拉取。
-- **包管理工具**: `uv` (Python) 和 `npm` (Node.js)。
+## 1. 前置依赖
 
----
+- Python 3.10+
+- Node.js 18+
+- Git
+- `uv` 或 `pip`
 
-## 2. 代码获取 (Clone Repository)
-如果您尚未拉取代码，请使用以下命令将项目克隆到本地：
-```bash
-git clone https://github.com/您的用户名/您的仓库名.git
-cd 您的仓库名
+推荐使用 `uv` 创建和管理 Python 虚拟环境。
+
+## 2. 后端环境
+
+在项目根目录执行：
+
+```powershell
+uv venv
+.\.venv\Scripts\Activate.ps1
+uv pip install -r requirements.txt
 ```
-*(注：如果已经在本地工作区 `d:\Desktop\软件工程\github-multimodal-rag`，可跳过此步)*
 
----
+如果已经存在 `.venv`，只需要激活环境并安装依赖：
 
-## 3. 后端环境配置 (Backend Setup - Python)
+```powershell
+.\.venv\Scripts\Activate.ps1
+uv pip install -r requirements.txt
+```
 
-后端核心负责数据的爬取、多模态处理（Tree-sitter、LangChain、Qdrant）以及暴漏 API 接口。
+## 3. 环境变量
 
-1. **进入项目根目录：**
-   ```bash
-   cd github-multimodal-rag
-   ```
+项目当前没有强依赖 `.env.example`，可以在根目录手动创建 `.env`。
 
-2. **安装 uv (若尚未安装)：**
-   - macOS (Homebrew): `brew install uv`
-   - macOS/Linux (安装脚本): `curl -LsSf https://astral.sh/uv/install.sh | sh`
-   - Windows (PowerShell): `powershell -c "irm https://astral.sh/uv/install.ps1 | iex"`
+最小本地开发配置：
 
-3. **创建 Python 虚拟环境 (Virtual Environment)：**
-   使用 uv 可以隔离项目依赖，防止与全局 Python 环境冲突。
-   ```bash
-   uv venv
-   ```
+```env
+QDRANT_MODE=local
+QDRANT_PATH=data/qdrant
+RAG_EMBEDDING_PROVIDER=hash
+```
 
-4. **激活虚拟环境：**
-   - Windows (Command Prompt): `.venv\Scripts\activate.bat`
-   - Windows (PowerShell): `.\.venv\Scripts\Activate.ps1`
-   - Mac/Linux: `source .venv/bin/activate`
+使用 OpenAI-compatible LLM 和 embedding：
 
-5. **安装后端依赖：**
-   激活虚拟环境后，确保命令行前有 `(.venv)` 标识，然后执行：
-   ```bash
-   uv pip install -r requirements.txt
-   ```
+```env
+OPENAI_API_KEY=your_openai_key
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
 
----
+LLM_API_KEY=your_llm_key
+LLM_BASE_URL=
+LLM_CHAT_MODEL=gpt-4o
+LLM_PROVIDER=
+LLM_EXTRA_BODY=
 
-## 4. 环境变量配置 (Environment Variables)
+QDRANT_MODE=local
+QDRANT_PATH=data/qdrant
+```
 
-系统需要调用 GitHub API 和大语言模型 API。我们需要在根目录下配置环境变量。
+读取 GitHub open issues：
 
-1. 在项目根目录 (`github-multimodal-rag/`) 找到 `.env.example` 文件。
-2. 复制该文件并重命名为 `.env`。
-3. 打开 `.env` 并填入您真实的 API 密钥等信息：
-   ```env
-   # Github Integration (获取代码和Issue需要的鉴权)
-   GITHUB_TOKEN=your_github_personal_access_token_here
+```env
+GITHUB_TOKEN=your_github_personal_access_token
+```
 
-   # OpenAI / GPT-4V for Vision & Text (LLM & Embedding 模型密钥)
-   OPENAI_API_KEY=your_openai_api_key_here
+说明：
+- `OPENAI_API_KEY` 主要用于 embedding。
+- `LLM_API_KEY` 或 `OPENAI_API_KEY` 可用于聊天模型。
+- 未配置 embedding key 时，系统会自动使用 deterministic hash embedding，方便本地测试。
+- 未配置聊天模型 key 且未配置 `LLM_BASE_URL` 时，系统会返回 offline preview。
 
-   # Vector DB configs (Qdrant 向量数据库配置)
-   # 如果使用 Qdrant 本地内存模式或 Docker 模式，请按需修改
-   QDRANT_HOST=localhost
-   QDRANT_PORT=6333
+## 4. Qdrant 配置
 
-   # 应用日志等级
-   LOG_LEVEL=INFO
-   ```
+本地文件模式：
 
----
+```env
+QDRANT_MODE=local
+QDRANT_PATH=data/qdrant
+QDRANT_COLLECTION=github_repo_multi_modal
+```
 
-## 5. 前端环境配置 (Frontend Setup - Vue3)
+远程服务模式：
 
-前端页面使用 Vue 3 + Vite 构建，位于 `ui/` 目录下。
+```env
+QDRANT_MODE=remote
+QDRANT_HOST=localhost
+QDRANT_PORT=6333
+QDRANT_API_KEY=
+```
 
-1. **进入前端目录：**
-   ```bash
-   cd ui
-   ```
+也可以直接使用：
 
-2. **安装 Node 依赖：**
-   ```bash
-   npm install
-   ```
+```env
+QDRANT_URL=https://your-qdrant-url
+QDRANT_API_KEY=your_qdrant_key
+```
 
----
+## 5. RAG 参数
 
-## 6. 启动开发服务器 (Run the Servers)
+```env
+RAG_RETRIEVAL_K=16
+RAG_REPO_CONTEXT_DOC_LIMIT=8
+RAG_MAX_CONTEXT_CHARS=24000
+RAG_HYBRID_VECTOR_CANDIDATES=48
+RAG_HYBRID_KEYWORD_CANDIDATES=800
+RAG_HYBRID_NEIGHBOR_WINDOW=1
+RAG_INDEX_BATCH_SIZE=64
+RAG_MAX_TEXT_FILE_BYTES=1048576
+RAG_GIT_LS_FILES_TIMEOUT_SECONDS=60
+```
 
-为了进行日常开发，您需要同时启动后端 API 服务和前端页面。建议在 VS Code 中**开启两个终端**分别运行。
+调优建议：
+- 大仓库可适当提高 `RAG_HYBRID_VECTOR_CANDIDATES` 和 `RAG_HYBRID_KEYWORD_CANDIDATES`。
+- 如果回答缺少函数上下文，提高 `RAG_HYBRID_NEIGHBOR_WINDOW`。
+- 如果模型报上下文过长，降低 `RAG_MAX_CONTEXT_CHARS` 或 `RAG_RETRIEVAL_K`。
+- 如果索引速度慢，可调整 `RAG_INDEX_BATCH_SIZE`。
 
-### 终端 1：启动 FastAPI 后端服务
-1. 确保在根目录 `github-multimodal-rag/` 且**虚拟环境已激活** `(.venv)`。
-2. 运行后端服务：
-   ```bash
-   uvicorn src.api.main:app --reload
-   ```
-3. 服务默认运行在 `http://127.0.0.1:8000`。
-   - 您可以访问 `http://127.0.0.1:8000/docs` 查看由 Swagger 自动生成的 API 接口交互文档。
+## 6. 启动服务
 
-### 终端 2：启动 Vue 前端服务
-1. 确保在前端目录 `github-multimodal-rag/ui/`。
-2. 启动 Vite 开发服务器：
-   ```bash
-   npm run dev
-   ```
-3. 服务通常会运行在 `http://localhost:3000` (或 5173，视终端输出而定)。
-4. Vite 配置中已经设定了 `/api` 相关的代理 (Proxy)，前端发送的 API 请求会自动转发到后端的 `8000` 端口，无需担心开发时的跨域 (CORS) 问题。
+后端：
 
----
+```powershell
+uvicorn src.api.main:app --reload --port 8002
+```
 
-## 7. Qdrant 向量数据库准备 (可选/进阶)
-在进行到向量检索开发 (Phase 3) 时，您需要一个 Qdrant 实例。
-- **方案 A (推荐开发者使用本地 Docker):**
-  ```bash
-  docker run -p 6333:6333 -p 6334:6334 -v $(pwd)/qdrant_storage:/qdrant/storage:z qdrant/qdrant
-  ```
-- **方案 B (Qdrant Cloud):**
-  注册 Qdrant Cloud 获取集群 URL 和 API Key，然后将其更新至 `.env` 文件。
-- **方案 C (本地内存 Memory 模式):**
-  在 LangChain / Qdrant-Client 初始化时直接指明 `location=":memory:"` 进行快读测试。
+前端：
+
+```powershell
+cd ui
+npm install
+npm run dev
+```
+
+前端 Vite 配置会把 `/api` 代理到 `http://127.0.0.1:8002`，默认访问地址是 `http://localhost:3000`。
+
+## 7. 使用流程
+
+1. 打开前端页面。
+2. 输入 GitHub URL 或本地仓库路径。
+3. 输入分支名，默认为 `main`。
+4. 点击开始索引。
+5. 索引完成后输入问题。
+6. 回答末尾会附带 `Sources`，用于追踪证据文件和行号。
+
+已有仓库在检索策略、manifest 逻辑或 chunk 元数据更新后，需要重新索引。
+
+## 8. 验证命令
+
+后端测试：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+前端构建：
+
+```powershell
+cd ui
+npm run build
+```
+
+## 9. 常见问题
+
+### 未配置 API Key 可以运行吗？
+
+可以。未配置 embedding key 时使用 hash embedding；未配置聊天模型时返回 offline preview。这样可以先验证仓库读取、索引和检索链路。
+
+### 为什么索引后回答没有更新？
+
+同一个 `repo_id` 重新索引会删除旧文档并写入新文档。若代码更新后回答仍旧，通常需要确认前端返回的是新的 `repo_id`，或删除本地 `data/qdrant` 后重新索引。
+
+### GitHub Issues 没有入库怎么办？
+
+需要配置 `GITHUB_TOKEN`，并确保输入源是 GitHub 仓库 URL。本地路径不会触发 GitHub Issues 读取。

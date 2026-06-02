@@ -1,52 +1,179 @@
+import json
 import os
-from langchain_core.prompts import ChatPromptTemplate
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from ai_prompter import Prompter
-from src.retrieval.vector_store import get_retriever
 
-# 集中式提示存储库初始化
-prompter = Prompter(prompt_dir="src/prompts")
+from src.retrieval.vector_store import hybrid_search_repo, load_repo_context_documents
 
 
-def format_docs(docs):
+PROMPT_PATH = Path("src/prompts/rag_prompt.jinja2")
+ROOT_DIR = Path(__file__).resolve().parents[2]
+DOTENV_PATH = ROOT_DIR / ".env"
+DEFAULT_RETRIEVAL_K = int(os.getenv("RAG_RETRIEVAL_K", "16"))
+REPO_CONTEXT_DOC_LIMIT = int(os.getenv("RAG_REPO_CONTEXT_DOC_LIMIT", "8"))
+MAX_CONTEXT_CHARS = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "24000"))
+
+
+def format_docs(docs, max_chars: int = MAX_CONTEXT_CHARS):
     """
-    将检索召回的 Document 列表格式化为纯文本字符串组合。
+    Format retrieved Documents with source metadata so generated answers can cite files.
     """
-    return "\n\n".join(doc.page_content for doc in docs)
+    formatted = []
+    used_chars = 0
+    for index, doc in enumerate(docs, start=1):
+        meta = doc.metadata
+        source = meta.get("url") or meta.get("path") or "unknown"
+        start_line = meta.get("start_line")
+        end_line = meta.get("end_line")
+        line_info = (
+            f":{start_line}-{end_line}" if start_line and end_line else ""
+        )
+        header = (
+            f"[{index}] {source}{line_info} ({meta.get('source_type', 'unknown')})\n"
+        )
+        remaining = max_chars - used_chars - len(header)
+        if remaining <= 0:
+            break
+
+        content = doc.page_content
+        if len(content) > remaining:
+            content = content[:remaining].rstrip() + "\n...[truncated]"
+
+        formatted.append(f"{header}{content}")
+        used_chars += len(formatted[-1]) + 2
+    return "\n\n".join(formatted)
+
+
+def format_sources(docs) -> str:
+    sources = []
+    seen = set()
+    for index, doc in enumerate(docs, start=1):
+        meta = doc.metadata
+        source = meta.get("url") or meta.get("path") or "unknown"
+        start_line = meta.get("start_line")
+        end_line = meta.get("end_line")
+        key = (source, start_line, end_line)
+        if key in seen:
+            continue
+        seen.add(key)
+        line_info = f":{start_line}-{end_line}" if start_line and end_line else ""
+        sources.append(f"[{index}] {source}{line_info}")
+    return "\n".join(sources)
+
 
 def build_rag_chain():
     """
-    使用 LCEL (LangChain Expression Language) 构建多模态 RAG 核心流水线
+    Build the generation-only chain. Retrieval is repo-aware and happens before this chain.
     """
-    retriever = get_retriever()
-    
-    # 初始化作为大脑的 LLM/VLM (如需多模态推荐使用 gpt-4o 或 gpt-4-vision-preview)
+    load_dotenv(dotenv_path=DOTENV_PATH, override=True)
+    rag_prompt_template = PROMPT_PATH.read_text(encoding="utf-8")
+    prompt = ChatPromptTemplate.from_template(
+        rag_prompt_template,
+        template_format="jinja2",
+    )
+    base_url = os.getenv("LLM_BASE_URL", "").strip()
+    if not base_url:  # handles empty string case
+        base_url = None
+
+    api_key = (os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
+    if not api_key:
+        api_key = None
+
+    extra_body = _load_json_env("LLM_EXTRA_BODY")
+    provider = os.getenv("LLM_PROVIDER", "").strip()
+    if provider and "provider" not in extra_body:
+        extra_body["provider"] = provider
+    model_kwargs = {"extra_body": extra_body} if extra_body else {}
+
     llm = ChatOpenAI(
-        model="gpt-4o",
-        api_key=os.getenv("OPENAI_API_KEY", "dummy-key-for-dev"),
+        model=os.getenv("LLM_CHAT_MODEL", os.getenv("OPENAI_CHAT_MODEL", "gpt-4o")),
+        api_key=api_key,
+        base_url=base_url,
         temperature=0.3,
-        streaming=True # 开启流式输出
+        streaming=True,
     )
-    
-    # 从集中式提示库加载 Jinja2 模板内容
-    rag_prompt_template = prompter.get_prompt("rag_prompt.jinja2")
+    return prompt | llm | StrOutputParser()
 
-    # 使用从集中式存储库中获取的内容初始化 Prompt Template
-    prompt = ChatPromptTemplate.from_template(rag_prompt_template, template_format="jinja2")
 
-    # 核心 LCEL 链：
-    # 1. 接受 question
-    # 2. retriever 根据 question 召回 context，并组装进字典
-    # 3. 将字典传入 prompt 模板
-    # 4. 传入 LLM
-    # 5. StrOutputParser 解析为纯文本流
-    rag_chain = (
-        {"context": retriever | format_docs, "question": RunnablePassthrough()}
-        | prompt
-        | llm
-        | StrOutputParser()
+async def stream_rag_answer(repo_id: str, question: str, k: int | None = None) -> AsyncIterator[str]:
+    retrieval_k = k or DEFAULT_RETRIEVAL_K
+    repo_context_docs = load_repo_context_documents(
+        repo_id,
+        limit=REPO_CONTEXT_DOC_LIMIT,
     )
+    retrieved_docs = hybrid_search_repo(repo_id, question, k=retrieval_k)
+    docs = _merge_documents(repo_context_docs, retrieved_docs)
+    context = format_docs(docs)
+
+    if _use_offline_answer():
+        yield _offline_answer(question, context)
+    else:
+        chain = build_rag_chain()
+        async for chunk in chain.astream({"context": context, "question": question}):
+            yield chunk
+
+    sources = format_sources(docs)
+    if sources:
+        yield f"\n\nSources:\n{sources}"
+
+
+def _use_offline_answer() -> bool:
+    load_dotenv(dotenv_path=DOTENV_PATH, override=True)
+    api_key = (os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "").strip()
+    base_url = os.getenv("LLM_BASE_URL", "").strip()
+    provider = os.getenv("RAG_LLM_PROVIDER", "openai").lower()
     
-    return rag_chain
+    if provider == "offline":
+        return True
+        
+    # 如果既没有配置 api_key，也没有配置 base_url (本地模型可能不需要 key)
+    if not api_key and not base_url:
+        return True
+        
+    return api_key.startswith("your_") and not base_url
+
+
+def _offline_answer(question: str, context: str) -> str:
+    if not context:
+        return "No indexed context was found for this repository, so I cannot answer from repository evidence."
+    preview = context[:1200]
+    return (
+        "Offline RAG preview. Configure LLM_API_KEY or LLM_BASE_URL for model-generated answers.\n\n"
+        f"Question: {question}\n\n"
+        f"Retrieved context:\n{preview}"
+    )
+
+
+def _merge_documents(*document_groups) -> list:
+    merged = []
+    seen = set()
+    for documents in document_groups:
+        for doc in documents:
+            meta = doc.metadata
+            key = (
+                meta.get("path") or meta.get("url") or "",
+                meta.get("source_type") or "",
+                meta.get("chunk_id") or 0,
+                meta.get("start_line") or 0,
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(doc)
+    return merged
+
+
+def _load_json_env(name: str) -> dict:
+    raw = (os.getenv(name) or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}

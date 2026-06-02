@@ -5,26 +5,30 @@ uvicorn
 # GitHub API Integration
 PyGithub
 
-# Core RAG Framework (LangChain for general LLM orchestration)
+# Core RAG Framework
 langchain
 langchain-core
 langchain-community
 langchain-openai
+langchain-text-splitters
 jinja2
 
 # Prompt Management
 ai-prompter
 
-# Vector Database (Qdrant or Milvus)
+# Vector Database
 qdrant-client
 
-# UI (已迁移至 Vue.js，此文件仅配置后端依赖)
+# Auth (JWT / password hashing — no extra deps needed, using stdlib)
+# python-jose[cryptography]  # optional: swap for stronger JWT if needed
+# passlib[bcrypt]            # optional: swap for argon2/bcrypt hashing
 
 # Code parsing / AST
-tree-sitter
+tree-sitter          # optional: for advanced multi-language AST (future use)
 
 # Utilities
 python-dotenv
+python-multipart
 requests
 pydantic
 

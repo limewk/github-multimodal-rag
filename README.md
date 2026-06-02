@@ -1,44 +1,117 @@
-# 面向 GitHub 仓库的多模态RAG智能问答系统 (Multimodal RAG for GitHub Repositories)
+# GitHub 多模态 RAG 智能问答系统
 
-## 项目简介 (Overview)
-本项目是一个专为分析、理解并针对 GitHub 仓库进行问答的智能辅助系统。结合大语言模型 (LLM) 和视觉语言模型 (VLM)，运用检索增强生成 (RAG) 技术，系统能够无缝处理整个代码仓库中的**文本、代码、以及附带的图像内容**（比如 Issue 中的报错图片、架构图、README中的UI截图等），从而为开发者提供更加准确和深度的问答能力。
+本项目面向 GitHub 仓库和本地代码仓库，提供仓库索引、混合检索增强生成和流式问答能力。系统会读取代码、Markdown、文本文件和图片引用，将内容切分成带来源元数据的文档，写入 Qdrant，并在问答时结合仓库概览、文件清单、检索证据和大模型生成回答。
 
-## 核心功能 (Key Features)
-1. **GitHub 多模态数据摄取**：自动抓取指定仓库或本地仓库的代码(Code)、文档(Markdown/PDF/DOC)及图片(PNG/JPG/SVG/UML文本等)。
-2. **多模态向量存储**：文本向量、代码结构化向量及图像 Embedding（如通过 CLIP 模型或统一多模态大模型方案）构建统一的/混合的向量检索库。
-3. **混合检索策略**：针对代码语义、文档段落和图片描述的双路或多路召回，并进行重排 (Reranking)。
-4. **多模态响应生成**：采用 VLM（如 GPT-4V, Claude 3 或 Qwen-VL 等）对检索到的代码段、图表一并进行理解，生成更贴近上下文的连贯回答。
+## 当前进展
 
-## 目录结构 (Directory Structure)
+截至 2026-05-19，项目已经完成基础 RAG MVP 和 Phase 2 检索增强。
+
+已具备：
+- 本地仓库和 GitHub URL 索引。
+- 基于 `git ls-files --exclude-standard` 的仓库文件枚举，避免递归扫描依赖、构建产物和缓存目录。
+- 文本、代码、Markdown、图片引用和 GitHub Issue 的基础入库。
+- 大仓库流式处理：文件、chunk、embedding 和 Qdrant 写入按批推进。
+- 自动生成 `repo_overview` 和 `repo_manifest`，帮助模型理解仓库整体范围。
+- 混合检索：向量召回、关键词/路径召回、轻量重排、重要文件加权、同文件相邻 chunk 扩展。
+- FastAPI 接口：`/health`、`/repos/index`、`/chat`。
+- Vue 3 + Vite 前端：仓库索引和 SSE 流式问答。
+- 离线开发兜底：未配置 embedding 或 LLM Key 时可使用 hash embedding 和离线预览。
+- 基础单元测试覆盖仓库读取、chunk 元数据、manifest、检索隔离、混合检索和 API 路由。
+
+仍待完善：
+- AST / Tree-sitter 级符号索引、导入关系和调用链。
+- 图片内容理解，目前只处理图片文件和 Markdown 图片引用，尚未做 OCR/VLM caption。
+- RAG 质量评测、检索调试接口和前端证据可视化。
+- 前端文案和部分源码中文注释存在编码乱码，需要单独修复。
+
+## 技术栈
+
+- Backend: FastAPI, LangChain, Qdrant, PyGithub
+- Frontend: Vue 3, Vite
+- Retrieval: Qdrant vector search + lexical/path recall + reranking
+- Embedding: OpenAI embeddings 或本地 deterministic hash embedding
+- LLM: OpenAI-compatible chat API，支持 `LLM_BASE_URL` 接入兼容服务
+- Tests: pytest, Vite build
+
+## 目录结构
+
+```text
+src/
+  api/           FastAPI 路由和应用入口
+  ingestion/     仓库解析、GitHub Issues 读取、索引入口
+  processing/    文档切分、图片引用抽取、repo overview/manifest 生成
+  retrieval/     Qdrant、embedding、混合检索和重排
+  generation/    RAG 上下文拼接、prompt、LLM 流式调用
+  prompts/       Jinja2 prompt 模板
+ui/              Vue 3 + Vite 前端
+tests/           单元测试
+docs/            配置、RAG 设计、开发计划和进展文档
 ```
-/
-├── config/              # 配置文件存放地 (YAML, JSON 等)
-├── data/                # 爬取的或处理中的临时数据与向量库本地文件
-├── docs/                # 项目文档（包括 API 文档、需求规格、设计文档）
-│   ├── PLAN.md          # <- 项目实施与系统开发详细计划
-│   └── SETUP.md         # 项目环境配置指南
-├── src/                 # 核心后端与后端代码目录
-│   ├── api/             # FastAPI/Flask 接口路由和控制器代码
-│   ├── ingestion/       # GitHub 数据摄取模块 (克隆、拉取、爬取 Issue 和 PR)
-│   ├── processing/      # 数据清洗与切分 (代码AST解析、Markdown解析、图片抽取)
-│   ├── retrieval/       # Embedding 模型加载，向量数据库的连接、写入与混合检索
-│   ├── generation/      # RAG 核心管道层与大模型(LLM/VLM)交互模块
-│   ├── prompts/         # 集中式提示词存储库 (基于 ai-prompter 与 Jinja2 组装)
-│   └── utils/           # 通用工具函数、日志配置、异常处理
-├── ui/                  # 前端 Vue 3 单页面应用源码 (使用 Vite 打包)
-├── tests/               # 单元测试与集成测试
-├── .env.example         # 环境变量示例 (如 GITHUB_TOKEN, OPENAI_API_KEY)
-├── .gitignore           # Git 的忽略配置
-└── requirements.txt     # Python 依赖包清单
+
+## 快速启动
+
+1. 安装后端依赖：
+
+```powershell
+uv venv
+.\.venv\Scripts\Activate.ps1
+uv pip install -r requirements.txt
 ```
 
-## 快速运行 (Quick Start)
-请参考 [docs/SETUP.md](docs/SETUP.md) 获取详细的环境配置（包含前端 Vite 及后端 FastAPI 的集成运行步骤）。简要后端启动流程如下：
+2. 创建 `.env`：
 
-1. `uv venv`
-2. `.\.venv\Scripts\Activate.ps1` (Windows) 或 `source .venv/bin/activate` (Mac/Linux)
-3. `uv pip install -r requirements.txt`
-4. 复制 `.env.example` 到 `.env` 并配置对应秘钥与 Qdrant 数据库连接信息。
-5. 运行 API服务: `uvicorn src.api.chat:router --reload` (或根据您的项目入口调整)
-6. 启动前端: `cd ui && npm install && npm run dev`
+```env
+OPENAI_API_KEY=your_openai_key
+LLM_API_KEY=your_llm_key
+LLM_BASE_URL=
+LLM_CHAT_MODEL=gpt-4o
 
+QDRANT_MODE=local
+QDRANT_PATH=data/qdrant
+```
+
+说明：`OPENAI_API_KEY` 主要用于 embedding；`LLM_API_KEY` 主要用于聊天模型。如果两者都不配置，系统会进入本地开发兜底模式。
+
+3. 启动后端：
+
+```powershell
+uvicorn src.api.main:app --reload --port 8002
+```
+
+4. 启动前端：
+
+```powershell
+cd ui
+npm install
+npm run dev
+```
+
+Vite 默认监听 `http://localhost:3000`，并代理 `/api` 到 `http://127.0.0.1:8002`。
+
+## 常用配置
+
+```env
+RAG_RETRIEVAL_K=16
+RAG_REPO_CONTEXT_DOC_LIMIT=8
+RAG_MAX_CONTEXT_CHARS=24000
+RAG_HYBRID_VECTOR_CANDIDATES=48
+RAG_HYBRID_KEYWORD_CANDIDATES=800
+RAG_HYBRID_NEIGHBOR_WINDOW=1
+RAG_INDEX_BATCH_SIZE=64
+RAG_MAX_TEXT_FILE_BYTES=1048576
+```
+
+## 验证
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+cd ui
+npm run build
+```
+
+## 进一步阅读
+
+- [环境配置](docs/SETUP.md)
+- [RAG 设计](docs/RAG.md)
+- [项目进展](docs/PROGRESS.md)
+- [开发计划](docs/PLAN.md)
