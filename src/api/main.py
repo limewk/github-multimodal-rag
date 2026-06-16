@@ -7,7 +7,7 @@ load_dotenv(dotenv_path=ROOT_DIR / ".env", override=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from src.api import auth, chat, repos, structure, upload
+from src.api import auth, chat, repos, structure, upload, admin
 
 app = FastAPI(
     title="GitHub Multimodal RAG API",
@@ -32,11 +32,13 @@ app.include_router(chat.router)
 app.include_router(repos.router)
 app.include_router(structure.router)
 app.include_router(upload.router)
+app.include_router(admin.router)
 app.include_router(auth.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
 app.include_router(repos.router, prefix="/api")
 app.include_router(structure.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
+app.include_router(admin.router, prefix="/api")
 
 
 @app.get("/", tags=["system"])

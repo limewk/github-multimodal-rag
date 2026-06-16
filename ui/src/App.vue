@@ -36,6 +36,20 @@ const chatMessages=ref([]), chatInput=ref(''), isAnswering=ref(false), chatEndRe
 const msgSources=ref({})
 let twQ='',twRaf=null,twMsg=null
 
+// ─── Admin State ────────────────────────────────────────────────
+const isAdmin=ref(false), adminTab=ref('users'), adminLoading=ref(false)
+const adminRegForm=reactive({username:'',email:'',password:'',confirm:'',adminKey:'',show:false})
+const adminUsers=ref([]), adminUsersTotal=ref(0), adminUsersPage=ref(1), adminUsersSearch=ref('')
+const adminUserDialog=ref(null), adminUserForm=reactive({username:'',email:'',password:'',role:'user'})
+const adminAuditLogs=ref([]), adminAuditTotal=ref(0), adminAuditPage=ref(1)
+const adminDashboard=ref(null), adminHealth=ref(null), adminResources=ref(null)
+const adminAlerts=ref([]), adminAlertForm=reactive({name:'',metric:'cpu_percent',threshold:80,operator:'gt',enabled:1})
+const adminAlertDialog=ref(null)
+const adminKbStats=ref(null), adminKbCollections=ref([]) // removed kb tab
+const adminConfig=ref(null), adminConfigHistory=ref([]), adminConfigPage=ref(1)
+const adminStats=ref(null)
+const adminPwdDialog=ref(null), adminPwdForm=reactive({userId:0,newPassword:''})
+
 // ─── Upload state ────────────────────────────────────────────────
 const uploadedFiles=ref([])   // {id,name,ext,icon,size,loading,error,contentType,text,base64,mediaType,charCount,pageCount,truncated,ocrStatus}
 const isDragOver=ref(false)
@@ -181,7 +195,7 @@ const switchAuth=(m)=>{authMode.value=m;authError.value='';authSuccess.value=''}
 const handleLogin=async()=>{
   authError.value='';if(!loginForm.email||!loginForm.password){authError.value='请填写邮箱和密码';return}
   authLoading.value=true
-  try{const d=await api('/auth/login',{method:'POST',body:JSON.stringify({email:loginForm.email,password:loginForm.password})});authToken.value=d.access_token;currentUser.value=d.user;localStorage.setItem('auth_token',d.access_token);localStorage.setItem('auth_user',JSON.stringify(d.user));currentView.value='main'}
+  try{const d=await api('/auth/login',{method:'POST',body:JSON.stringify({email:loginForm.email,password:loginForm.password})});authToken.value=d.access_token;currentUser.value=d.user;isAdmin.value=d.user?.role==='admin';localStorage.setItem('auth_token',d.access_token);localStorage.setItem('auth_user',JSON.stringify(d.user));currentView.value='main'}
   catch(e){authError.value=e.message}finally{authLoading.value=false}
 }
 const handleRegister=async()=>{
@@ -202,9 +216,116 @@ const handleReset=async()=>{
   try{await api('/auth/reset-password',{method:'POST',body:JSON.stringify({reset_token:resetForm.token,new_password:resetForm.password})});authSuccess.value='密码已重置，请登录';authMode.value='login'}
   catch(e){authError.value=e.message}finally{authLoading.value=false}
 }
-const handleLogout=()=>{authToken.value='';currentUser.value=null;localStorage.removeItem('auth_token');localStorage.removeItem('auth_user');currentView.value='auth';clearAll()}
+const handleLogout=()=>{authToken.value='';currentUser.value=null;isAdmin.value=false;localStorage.removeItem('auth_token');localStorage.removeItem('auth_user');currentView.value='auth';clearAll()}
 
-// ── Repo ────────────────────────────────────────────────────────
+// ── Admin ────────────────────────────────────────────────────────
+const checkAdmin=()=>{isAdmin.value=currentUser.value?.role==='admin'}
+
+const handleAdminRegister=async()=>{
+  authError.value='';if(!adminRegForm.username||!adminRegForm.email||!adminRegForm.password||!adminRegForm.adminKey){authError.value='请填写所有字段';return}
+  if(adminRegForm.password!==adminRegForm.confirm){authError.value='两次密码不一致';return}
+  authLoading.value=true
+  try{await api('/admin/register',{method:'POST',body:JSON.stringify({username:adminRegForm.username,email:adminRegForm.email,password:adminRegForm.password,admin_key:adminRegForm.adminKey})});authSuccess.value='管理员注册成功，请登录';authMode.value='login'}
+  catch(e){authError.value=e.message}finally{authLoading.value=false}
+}
+
+const handleAdminLogin=async()=>{
+  authError.value='';if(!loginForm.email||!loginForm.password){authError.value='请填写邮箱和密码';return}
+  authLoading.value=true
+  try{const d=await api('/admin/login',{method:'POST',body:JSON.stringify({email:loginForm.email,password:loginForm.password})});authToken.value=d.access_token;currentUser.value=d.user;isAdmin.value=true;localStorage.setItem('auth_token',d.access_token);localStorage.setItem('auth_user',JSON.stringify(d.user));currentView.value='main';activeTab.value='admin'}
+  catch(e){authError.value=e.message}finally{authLoading.value=false}
+}
+
+const loadAdminUsers=async()=>{
+  adminLoading.value=true
+  try{const d=await api(`/admin/users?page=${adminUsersPage.value}&page_size=20&search=${adminUsersSearch.value}`);adminUsers.value=d.users;adminUsersTotal.value=d.total}
+  catch(e){console.error(e)}finally{adminLoading.value=false}
+}
+
+const loadAdminAuditLogs=async()=>{
+  adminLoading.value=true
+  try{const d=await api(`/admin/audit-logs?page=${adminAuditPage.value}&page_size=20`);adminAuditLogs.value=d.logs;adminAuditTotal.value=d.total}
+  catch(e){console.error(e)}finally{adminLoading.value=false}
+}
+
+const loadAdminDashboard=async()=>{
+  adminLoading.value=true
+  try{const d=await api('/admin/monitor/dashboard');adminDashboard.value=d}
+  catch(e){console.error(e)}finally{adminLoading.value=false}
+}
+
+const loadAdminHealth=async()=>{
+  try{adminHealth.value=await api('/admin/monitor/health')}catch(e){console.error(e)}
+}
+
+const loadAdminResources=async()=>{
+  try{adminResources.value=await api('/admin/monitor/resources')}catch(e){console.error(e)}
+}
+
+const loadAdminAlerts=async()=>{
+  try{adminAlerts.value=(await api('/admin/alerts')).rules}catch(e){console.error(e)}
+}
+
+const loadAdminConfig=async()=>{
+  adminLoading.value=true
+  try{adminConfig.value=await api('/admin/config')}catch(e){console.error(e)}finally{adminLoading.value=false}
+}
+
+const loadAdminConfigHistory=async()=>{
+  try{const d=await api(`/admin/config/history?page=${adminConfigPage.value}`);adminConfigHistory.value=d.logs}catch(e){console.error(e)}
+}
+
+const loadAdminStats=async()=>{
+  try{adminStats.value=await api('/admin/stats/overview')}catch(e){console.error(e)}
+}
+
+const openCreateUser=()=>{adminUserDialog.value='create';Object.assign(adminUserForm,{username:'',email:'',password:'',role:'user'})}
+const openEditUser=(u)=>{adminUserDialog.value='edit';Object.assign(adminUserForm,{username:u.username,email:u.email,password:'',role:u.role,userId:u.id})}
+const closeUserDialog=()=>{adminUserDialog.value=null}
+
+const handleCreateUser=async()=>{
+  if(!adminUserForm.username||!adminUserForm.email||!adminUserForm.password){return}
+  try{await api('/admin/users',{method:'POST',body:JSON.stringify(adminUserForm)});closeUserDialog();loadAdminUsers()}
+  catch(e){alert(e.message)}
+}
+
+const handleUpdateUser=async(id)=>{
+  const body={};if(adminUserForm.username)body.username=adminUserForm.username;if(adminUserForm.email)body.email=adminUserForm.email;if(adminUserForm.role)body.role=adminUserForm.role
+  try{await api(`/admin/users/${id}`,{method:'PUT',body:JSON.stringify(body)});closeUserDialog();loadAdminUsers()}
+  catch(e){alert(e.message)}
+}
+
+const handleDeleteUser=async(id)=>{
+  if(!confirm('确定删除该用户？'))return
+  try{await api(`/admin/users/${id}`,{method:'DELETE'});loadAdminUsers()}catch(e){alert(e.message)}
+}
+
+const handleToggleUserStatus=async(u)=>{
+  try{await api(`/admin/users/${u.id}`,{method:'PUT',body:JSON.stringify({is_active:u.is_active?0:1})});loadAdminUsers()}catch(e){alert(e.message)}
+}
+
+const handleResetUserPwd=async()=>{
+  try{await api(`/admin/users/${adminPwdForm.userId}/reset-password`,{method:'POST',body:JSON.stringify({user_id:adminPwdForm.userId,new_password:adminPwdForm.newPassword})});adminPwdDialog.value=null;adminPwdForm.newPassword='';alert('密码已重置')}catch(e){alert(e.message)}
+}
+
+const handleUpdateConfig=async(key,value)=>{
+  try{await api('/admin/config',{method:'PUT',body:JSON.stringify({key,value})});loadAdminConfig()}catch(e){alert(e.message)}
+}
+
+const handleCreateAlert=async()=>{
+  try{await api('/admin/alerts',{method:'POST',body:JSON.stringify(adminAlertForm)});adminAlertDialog.value=null;loadAdminAlerts()}catch(e){alert(e.message)}
+}
+
+const handleDeleteAlert=async(id)=>{
+  if(!confirm('确定删除该告警规则？'))return
+  try{await api(`/admin/alerts/${id}`,{method:'DELETE'});loadAdminAlerts()}catch(e){alert(e.message)}
+}
+
+const fmtBytes=(b)=>{if(!b)return'0 B';const u=['B','KB','MB','GB','TB'];let i=0;while(b>=1024&&i<u.length-1){b/=1024;i++}return b.toFixed(1)+' '+u[i]}
+const fmtUptime=(s)=>{const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return d>0?`${d}天${h}时${m}分`:`${h}时${m}分`}
+const fmtTs=(ts)=>{if(!ts)return'-';const d=new Date(ts*1000);return d.toLocaleString('zh-CN')}
+
+// ── Repo ──────────────────────────────────────────────────────────────────
 const clearAll=()=>{
   chatMessages.value=[];msgSources.value={};currentSessionId.value=null;structureData.value=null;selectedChunk.value=null
   selectedFile.value=null;previewFile.value=null;expandedDirs.value=new Set();expandedFiles.value=new Set()
@@ -761,7 +882,7 @@ onMounted(()=>{
   loadLibs()
   loadHistory()
   const tok=localStorage.getItem('auth_token'),usr=localStorage.getItem('auth_user')
-  if(tok&&usr)try{authToken.value=tok;currentUser.value=JSON.parse(usr);currentView.value='main'}catch{handleLogout()}
+  if(tok&&usr)try{authToken.value=tok;currentUser.value=JSON.parse(usr);isAdmin.value=currentUser.value?.role==='admin';currentView.value='main'}catch{handleLogout()}
   resizeObs=new ResizeObserver(()=>{const w=kgWrapRef.value,cv=canvasRef.value;if(!w||!cv)return;cv.width=w.clientWidth;cv.height=Math.max(380,w.clientHeight-56);if(simNodes.length)drawKG(cv)})
   callResObs=new ResizeObserver(()=>{const w=callWrapRef.value,cv=callCanvasRef.value;if(!w||!cv)return;cv.width=w.clientWidth;cv.height=Math.max(380,w.clientHeight-56);if(callNodes.length)drawCG(cv)})
 })
@@ -773,6 +894,12 @@ watch(activeTab,async(tab)=>{
 })
 watch(graphFilter,()=>{if(repoId.value&&structureData.value)buildKGraph()})
 watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanvasRef.value&&callWrapRef.value){const cv=callCanvasRef.value,w=callWrapRef.value;cv.width=w.clientWidth;cv.height=Math.max(380,w.clientHeight-56);if(repoId.value&&structureData.value&&!callNodes.length)buildCallGraph();else if(callNodes.length)drawCG(cv)}}if(st==='treemap'&&repoId.value&&!structureData.value)loadStructure()})
+watch(adminTab,async(tab)=>{
+  if(tab==='users')loadAdminUsers()
+  else if(tab==='monitor'){loadAdminDashboard();loadAdminHealth();loadAdminResources();loadAdminAlerts()}
+  else if(tab==='config'){loadAdminConfig();loadAdminConfigHistory()}
+  else if(tab==='audit')loadAdminAuditLogs()
+})
 </script>
 
 <template>
@@ -785,7 +912,7 @@ watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanv
   <div class="auth-card">
     <div class="ac-logo"><svg width="36" height="36" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="17" stroke="url(#lg1)" stroke-width="1.5"/><path d="M10 18L18 10L26 18L18 26Z" fill="none" stroke="url(#lg1)" stroke-width="1.5"/><circle cx="18" cy="18" r="3.5" fill="url(#lg1)" opacity=".9"/><line x1="18" y1="10" x2="18" y2="6" stroke="#00FFD4" stroke-width="1.5" stroke-linecap="round"/><line x1="18" y1="26" x2="18" y2="30" stroke="#00FFD4" stroke-width="1.5" stroke-linecap="round"/><line x1="10" y1="18" x2="6" y2="18" stroke="#818CF8" stroke-width="1.5" stroke-linecap="round"/><line x1="26" y1="18" x2="30" y2="18" stroke="#818CF8" stroke-width="1.5" stroke-linecap="round"/><defs><linearGradient id="lg1" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse"><stop stop-color="#00FFD4"/><stop offset="1" stop-color="#818CF8"/></linearGradient></defs></svg><span class="ac-name">CodeCompass</span></div>
     <p class="ac-sub">面向初学者的 GitHub 仓库智能解析助手</p>
-    <div v-if="authMode==='login'||authMode==='register'" class="ac-tabs"><button :class="['act',authMode==='login'&&'on']" @click="switchAuth('login')">登录</button><button :class="['act',authMode==='register'&&'on']" @click="switchAuth('register')">注册</button></div>
+    <div v-if="authMode==='login'||authMode==='register'||authMode==='admin-login'||authMode==='admin-register'" class="ac-tabs"><button :class="['act',authMode==='login'&&'on']" @click="switchAuth('login')">登录</button><button :class="['act',authMode==='register'&&'on']" @click="switchAuth('register')">注册</button><button :class="['act',(authMode==='admin-login'||authMode==='admin-register')&&'on']" @click="switchAuth('admin-login')">管理员</button></div>
     <transition name="ale"><div v-if="authError"   class="ac-alert ae">⚠ {{ authError }}</div></transition>
     <transition name="ale"><div v-if="authSuccess" class="ac-alert ao">✓ {{ authSuccess }}</div></transition>
     <form v-if="authMode==='login'" class="acf" @submit.prevent="handleLogin">
@@ -802,6 +929,22 @@ watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanv
       </div>
       <div class="fld"><label>确认密码</label><input v-model="regForm.confirm" :type="regForm.show?'text':'password'" placeholder="再次输入" required/><span v-if="regForm.confirm&&regForm.password!==regForm.confirm" class="ferr">密码不一致</span></div>
       <button type="submit" class="btn-prime" :disabled="authLoading"><span v-if="authLoading" class="sp"></span><span v-else>创建账号</span></button>
+    </form>
+    <form v-if="authMode==='admin-login'" class="acf" @submit.prevent="handleAdminLogin">
+      <div class="fld"><label>管理员邮箱</label><input v-model="loginForm.email" type="email" placeholder="admin@example.com" required/></div>
+      <div class="fld"><label>管理员密码</label><div class="pw"><input v-model="loginForm.password" :type="loginForm.show?'text':'password'" placeholder="••••••••" required/><button type="button" class="eye" @click="loginForm.show=!loginForm.show">{{ loginForm.show?'🙈':'👁' }}</button></div></div>
+      <button type="submit" class="btn-prime" :disabled="authLoading" style="background:linear-gradient(135deg,#818CF8,#6366F1)"><span v-if="authLoading" class="sp"></span><span v-else>管理员登录</span></button>
+      <p class="ac-link"><a href="#" @click.prevent="switchAuth('admin-register')">注册管理员账号</a></p>
+      <p class="ac-link"><a href="#" @click.prevent="switchAuth('login')">← 返回普通登录</a></p>
+    </form>
+    <form v-if="authMode==='admin-register'" class="acf" @submit.prevent="handleAdminRegister">
+      <button type="button" class="bk-btn" @click="switchAuth('admin-login')">← 返回</button><h3 class="ac-h">注册管理员</h3>
+      <div class="fld"><label>用户名</label><input v-model="adminRegForm.username" type="text" placeholder="admin" required/></div>
+      <div class="fld"><label>邮箱</label><input v-model="adminRegForm.email" type="email" placeholder="admin@example.com" required/></div>
+      <div class="fld"><label>密码</label><div class="pw"><input v-model="adminRegForm.password" :type="adminRegForm.show?'text':'password'" placeholder="至少 8 位" required/><button type="button" class="eye" @click="adminRegForm.show=!adminRegForm.show">{{ adminRegForm.show?'🙈':'👁' }}</button></div></div>
+      <div class="fld"><label>确认密码</label><input v-model="adminRegForm.confirm" :type="adminRegForm.show?'text':'password'" placeholder="再次输入" required/></div>
+      <div class="fld"><label>管理员注册密钥</label><input v-model="adminRegForm.adminKey" type="text" placeholder="输入管理员注册密钥" required style="border-color:rgba(129,140,248,.4)"/></div>
+      <button type="submit" class="btn-prime" :disabled="authLoading" style="background:linear-gradient(135deg,#818CF8,#6366F1)"><span v-if="authLoading" class="sp"></span><span v-else>注册管理员</span></button>
     </form>
     <form v-if="authMode==='forgot'" class="acf" @submit.prevent="handleForgot">
       <button type="button" class="bk-btn" @click="switchAuth('login')">← 返回</button><h3 class="ac-h">找回密码</h3>
@@ -832,6 +975,9 @@ watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanv
         :key="t.id" :class="['snav',activeTab===t.id&&'on']" :style="activeTab===t.id?`--nc:${t.c}`:''" @click="activeTab=t.id">
         <span class="sni">{{ t.g }}</span><span class="snl">{{ t.l }}</span>
         <span v-if="t.id==='chat'&&chatMessages.filter(m=>m.role==='user').length" class="snbg">{{ chatMessages.filter(m=>m.role==='user').length }}</span>
+      </button>
+      <button v-if="isAdmin" :class="['snav',activeTab==='admin'&&'on']" style="--nc:#818CF8" @click="activeTab='admin'">
+        <span class="sni">🛡</span><span class="snl">管理中心</span>
       </button>
     </nav>
     <div class="sb-usr">
@@ -1252,6 +1398,251 @@ watch(visualSubTab,async(st)=>{if(st==='callgraph'){await nextTick();if(callCanv
       </div>
     </div>
 
+    <!-- ═══ ADMIN PANEL ═══════════════════════════════════════ -->
+    <div v-show="activeTab==='admin'" class="panel admin-panel">
+      <div class="ph"><h2 class="pt grd">🛡 管理中心</h2>
+        <div class="pa">
+          <div class="sub-tabs">
+            <button :class="['stab',adminTab==='users'&&'on']" @click="adminTab='users'">👥 用户管理</button>
+            <button :class="['stab',adminTab==='monitor'&&'on']" @click="adminTab='monitor'">📊 系统监控</button>
+            <button :class="['stab',adminTab==='config'&&'on']" @click="adminTab='config'">⚙️ 系统配置</button>
+            <button :class="['stab',adminTab==='audit'&&'on']" @click="adminTab='audit'">📋 审计日志</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── USER MANAGEMENT ─── -->
+      <div v-show="adminTab==='users'" class="admin-content">
+        <div class="adm-toolbar">
+          <input v-model="adminUsersSearch" class="si sm" placeholder="搜索用户名/邮箱…" @keyup.enter="adminUsersPage=1;loadAdminUsers()"/>
+          <select v-model="adminUsersSearch" class="sel-sm" @change="adminUsersPage=1;loadAdminUsers()">
+            <option value="">全部角色</option><option value="admin">管理员</option><option value="user">普通用户</option>
+          </select>
+          <button class="btn-sm" @click="adminUsersPage=1;loadAdminUsers()">🔍</button>
+          <button class="btn-prime sm" style="margin-left:auto" @click="openCreateUser">＋ 创建用户</button>
+        </div>
+        <div class="adm-table-wrap">
+          <table class="adm-table">
+            <thead><tr><th>ID</th><th>用户名</th><th>邮箱</th><th>角色</th><th>状态</th><th>注册时间</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="u in adminUsers" :key="u.id">
+                <td>{{ u.id }}</td>
+                <td><strong>{{ u.username }}</strong></td>
+                <td class="adm-email">{{ u.email }}</td>
+                <td><span :class="['role-badge',u.role]">{{ u.role==='admin'?'管理员':'用户' }}</span></td>
+                <td><span :class="['status-dot',u.is_active?'active':'disabled']"></span>{{ u.is_active?'启用':'禁用' }}</td>
+                <td>{{ fmtTs(u.created_at) }}</td>
+                <td class="adm-actions">
+                  <button class="btn-sm" @click="openEditUser(u)" title="编辑">✏️</button>
+                  <button class="btn-sm" @click="handleToggleUserStatus(u)" :title="u.is_active?'禁用':'启用'">{{ u.is_active?'🔒':'🔓' }}</button>
+                  <button class="btn-sm" @click="adminPwdForm.userId=u.id;adminPwdDialog=true" title="重置密码">🔑</button>
+                  <button class="btn-sm" style="color:var(--er)" @click="handleDeleteUser(u.id)" title="删除">🗑</button>
+                </td>
+              </tr>
+              <tr v-if="!adminUsers.length"><td colspan="7" class="adm-empty">暂无用户数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="adm-pagination">
+          <span class="adm-pg-info">共 {{ adminUsersTotal }} 条</span>
+          <button class="btn-sm" :disabled="adminUsersPage<=1" @click="adminUsersPage--;loadAdminUsers()">上一页</button>
+          <span class="adm-pg-cur">{{ adminUsersPage }}</span>
+          <button class="btn-sm" :disabled="adminUsersPage*20>=adminUsersTotal" @click="adminUsersPage++;loadAdminUsers()">下一页</button>
+        </div>
+      </div>
+
+      <!-- ─── SYSTEM MONITOR ─── -->
+      <div v-show="adminTab==='monitor'" class="admin-content">
+        <div v-if="!adminDashboard" class="empty"><div class="sp lg"></div><p>加载监控数据…</p></div>
+        <template v-else>
+          <!-- Resource Cards -->
+          <div class="adm-cards">
+            <div class="adm-card"><div class="adm-card-icon" style="color:#00FFD4">🖥</div><div class="adm-card-body"><div class="adm-card-val" style="color:#00FFD4">{{ adminDashboard.resources?.cpu_percent?.toFixed(1) }}%</div><div class="adm-card-label">CPU 使用率</div></div></div>
+            <div class="adm-card"><div class="adm-card-icon" style="color:#818CF8">💾</div><div class="adm-card-body"><div class="adm-card-val" style="color:#818CF8">{{ adminDashboard.resources?.memory_percent?.toFixed(1) }}%</div><div class="adm-card-label">内存 ({{ fmtBytes(adminDashboard.resources?.memory_used) }} / {{ fmtBytes(adminDashboard.resources?.memory_total) }})</div></div></div>
+            <div class="adm-card"><div class="adm-card-icon" style="color:#F472B6">💿</div><div class="adm-card-body"><div class="adm-card-val" style="color:#F472B6">{{ adminDashboard.resources?.disk_percent?.toFixed(1) }}%</div><div class="adm-card-label">磁盘 ({{ fmtBytes(adminDashboard.resources?.disk_used) }} / {{ fmtBytes(adminDashboard.resources?.disk_total) }})</div></div></div>
+            <div class="adm-card"><div class="adm-card-icon" style="color:#FBBF24">⏱</div><div class="adm-card-body"><div class="adm-card-val" style="color:#FBBF24">{{ fmtUptime(adminDashboard.system?.uptime||0) }}</div><div class="adm-card-label">运行时间</div></div></div>
+          </div>
+          <!-- Health Check -->
+          <div class="adm-section">
+            <h3 class="adm-sec-title">服务健康状态</h3>
+            <div class="adm-health-grid">
+              <div v-for="s in (adminHealth?.services||[])" :key="s.name" :class="['adm-health-card',s.status]">
+                <span :class="['health-dot',s.status]"></span>
+                <div class="adm-hc-name">{{ s.name }}</div>
+                <div class="adm-hc-detail">{{ s.detail }}</div>
+                <div v-if="s.latency_ms" class="adm-hc-latency">{{ s.latency_ms }}ms</div>
+              </div>
+            </div>
+          </div>
+          <!-- User Stats -->
+          <div class="adm-section">
+            <h3 class="adm-sec-title">用户统计</h3>
+            <div class="adm-cards">
+              <div class="adm-card mini"><div class="adm-card-val">{{ adminDashboard.users_stats?.total }}</div><div class="adm-card-label">总用户</div></div>
+              <div class="adm-card mini"><div class="adm-card-val" style="color:var(--ok)">{{ adminDashboard.users_stats?.active }}</div><div class="adm-card-label">活跃</div></div>
+              <div class="adm-card mini"><div class="adm-card-val" style="color:#818CF8">{{ adminDashboard.users_stats?.admins }}</div><div class="adm-card-label">管理员</div></div>
+              <div class="adm-card mini"><div class="adm-card-val" style="color:var(--er)">{{ adminDashboard.users_stats?.inactive }}</div><div class="adm-card-label">禁用</div></div>
+            </div>
+          </div>
+          <!-- Alert Rules -->
+          <div class="adm-section">
+            <h3 class="adm-sec-title">告警规则 <button class="btn-sm" @click="adminAlertDialog=true" style="margin-left:8px">＋ 添加</button></h3>
+            <div v-if="adminAlerts.length" class="adm-table-wrap">
+              <table class="adm-table">
+                <thead><tr><th>名称</th><th>指标</th><th>阈值</th><th>比较</th><th>状态</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr v-for="a in adminAlerts" :key="a.id">
+                    <td>{{ a.name }}</td><td>{{ a.metric }}</td><td>{{ a.threshold }}</td><td>{{ a.operator }}</td>
+                    <td><span :class="['status-dot',a.enabled?'active':'disabled']"></span>{{ a.enabled?'启用':'禁用' }}</td>
+                    <td><button class="btn-sm" style="color:var(--er)" @click="handleDeleteAlert(a.id)">🗑</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="adm-empty-text">暂无告警规则</p>
+          </div>
+        </template>
+      </div>
+
+      <!-- ─── SYSTEM CONFIG ─── -->
+      <div v-show="adminTab==='config'" class="admin-content">
+        <div v-if="!adminConfig" class="empty"><div class="sp lg"></div><p>加载配置…</p></div>
+        <template v-else>
+          <div class="adm-section">
+            <h3 class="adm-sec-title">Embedding 模型配置</h3>
+            <div class="adm-config-grid">
+              <div class="adm-config-item"><span class="adm-cfg-key">RAG_EMBEDDING_PROVIDER</span>
+                <select class="sel-sm" :value="adminConfig.runtime?.embedding?.provider" @change="handleUpdateConfig('RAG_EMBEDDING_PROVIDER',$event.target.value)">
+                  <option value="hash">Hash (离线)</option><option value="openai">OpenAI</option>
+                </select>
+              </div>
+              <div class="adm-config-item"><span class="adm-cfg-key">OPENAI_EMBEDDING_MODEL</span>
+                <input class="si sm" :value="adminConfig.runtime?.embedding?.model" @change="handleUpdateConfig('OPENAI_EMBEDDING_MODEL',$event.target.value)"/>
+              </div>
+              <div class="adm-config-item"><span class="adm-cfg-key">RAG_HASH_EMBEDDING_DIM</span>
+                <input class="si sm" type="number" :value="adminConfig.runtime?.embedding?.hash_dimension" @change="handleUpdateConfig('RAG_HASH_EMBEDDING_DIM',$event.target.value)"/>
+              </div>
+            </div>
+          </div>
+          <div class="adm-section">
+            <h3 class="adm-sec-title">检索参数配置</h3>
+            <div class="adm-config-grid">
+              <div class="adm-config-item"><span class="adm-cfg-key">RAG_RETRIEVAL_K (Top-K)</span>
+                <input class="si sm" type="number" min="1" max="100" :value="adminConfig.runtime?.retrieval?.top_k" @change="handleUpdateConfig('RAG_RETRIEVAL_K',$event.target.value)"/>
+                <span class="adm-cfg-hint">检索返回文档数</span>
+              </div>
+              <div class="adm-config-item"><span class="adm-cfg-key">RAG_MAX_CONTEXT_CHARS</span>
+                <input class="si sm" type="number" :value="adminConfig.runtime?.retrieval?.max_context_chars" @change="handleUpdateConfig('RAG_MAX_CONTEXT_CHARS',$event.target.value)"/>
+              </div>
+              <div class="adm-config-item"><span class="adm-cfg-key">RAG_HYBRID_VECTOR_CANDIDATES</span>
+                <input class="si sm" type="number" :value="adminConfig.runtime?.retrieval?.hybrid_vector_candidates" @change="handleUpdateConfig('RAG_HYBRID_VECTOR_CANDIDATES',$event.target.value)"/>
+              </div>
+              <div class="adm-config-item"><span class="adm-cfg-key">RAG_HYBRID_KEYWORD_CANDIDATES</span>
+                <input class="si sm" type="number" :value="adminConfig.runtime?.retrieval?.hybrid_keyword_candidates" @change="handleUpdateConfig('RAG_HYBRID_KEYWORD_CANDIDATES',$event.target.value)"/>
+              </div>
+            </div>
+          </div>
+          <div class="adm-section">
+            <h3 class="adm-sec-title">其他配置</h3>
+            <div class="adm-config-grid">
+              <div class="adm-config-item"><span class="adm-cfg-key">OCR_ENABLED</span>
+                <select class="sel-sm" :value="adminConfig.runtime?.ocr?.enabled" @change="handleUpdateConfig('OCR_ENABLED',$event.target.value)">
+                  <option value="true">启用</option><option value="false">禁用</option>
+                </select>
+              </div>
+              <div class="adm-config-item"><span class="adm-cfg-key">OCR_LANGS</span>
+                <input class="si sm" :value="adminConfig.runtime?.ocr?.langs" @change="handleUpdateConfig('OCR_LANGS',$event.target.value)"/>
+              </div>
+              <div class="adm-config-item"><span class="adm-cfg-key">RAG_INDEX_BATCH_SIZE</span>
+                <input class="si sm" type="number" :value="adminConfig.runtime?.indexing?.batch_size" @change="handleUpdateConfig('RAG_INDEX_BATCH_SIZE',$event.target.value)"/>
+              </div>
+            </div>
+          </div>
+          <!-- Config History -->
+          <div class="adm-section">
+            <h3 class="adm-sec-title">配置修改历史</h3>
+            <div class="adm-table-wrap">
+              <table class="adm-table">
+                <thead><tr><th>时间</th><th>操作人</th><th>配置项</th><th>详情</th></tr></thead>
+                <tbody>
+                  <tr v-for="l in adminConfigHistory" :key="l.id"><td>{{ fmtTs(l.created_at) }}</td><td>{{ l.username }}</td><td>{{ l.target }}</td><td>{{ l.detail }}</td></tr>
+                  <tr v-if="!adminConfigHistory.length"><td colspan="4" class="adm-empty">暂无修改记录</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <!-- ─── AUDIT LOGS ─── -->
+      <div v-show="adminTab==='audit'" class="admin-content">
+        <div class="adm-table-wrap">
+          <table class="adm-table">
+            <thead><tr><th>时间</th><th>用户</th><th>操作</th><th>目标</th><th>详情</th></tr></thead>
+            <tbody>
+              <tr v-for="l in adminAuditLogs" :key="l.id"><td>{{ fmtTs(l.created_at) }}</td><td>{{ l.username }}</td><td><span class="adm-action-badge">{{ l.action }}</span></td><td>{{ l.target }}</td><td class="adm-detail">{{ l.detail }}</td></tr>
+              <tr v-if="!adminAuditLogs.length"><td colspan="5" class="adm-empty">暂无审计日志</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="adm-pagination">
+          <span class="adm-pg-info">共 {{ adminAuditTotal }} 条</span>
+          <button class="btn-sm" :disabled="adminAuditPage<=1" @click="adminAuditPage--;loadAdminAuditLogs()">上一页</button>
+          <span class="adm-pg-cur">{{ adminAuditPage }}</span>
+          <button class="btn-sm" :disabled="adminAuditPage*20>=adminAuditTotal" @click="adminAuditPage++;loadAdminAuditLogs()">下一页</button>
+        </div>
+      </div>
+
+      <!-- ─── DIALOGS ─── -->
+      <!-- Create/Edit User Dialog -->
+      <div v-if="adminUserDialog" class="adm-overlay" @click.self="closeUserDialog">
+        <div class="adm-dialog">
+          <h3 class="adm-dialog-title">{{ adminUserDialog==='create'?'创建用户':'编辑用户' }}</h3>
+          <div class="adm-dialog-body">
+            <div class="fld"><label>用户名</label><input v-model="adminUserForm.username" class="si" required/></div>
+            <div class="fld"><label>邮箱</label><input v-model="adminUserForm.email" class="si" type="email" required/></div>
+            <div v-if="adminUserDialog==='create'" class="fld"><label>密码</label><input v-model="adminUserForm.password" class="si" type="password" required/></div>
+            <div class="fld"><label>角色</label><select v-model="adminUserForm.role" class="sel-sm" style="width:100%;padding:10px"><option value="user">普通用户</option><option value="admin">管理员</option></select></div>
+          </div>
+          <div class="adm-dialog-actions">
+            <button class="btn-sm" @click="closeUserDialog">取消</button>
+            <button class="btn-prime sm" @click="adminUserDialog==='create'?handleCreateUser():handleUpdateUser(adminUserForm.userId)">确认</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reset Password Dialog -->
+      <div v-if="adminPwdDialog" class="adm-overlay" @click.self="adminPwdDialog=null">
+        <div class="adm-dialog">
+          <h3 class="adm-dialog-title">重置用户密码</h3>
+          <div class="adm-dialog-body">
+            <div class="fld"><label>新密码</label><input v-model="adminPwdForm.newPassword" class="si" type="password" placeholder="至少 8 位" required/></div>
+          </div>
+          <div class="adm-dialog-actions">
+            <button class="btn-sm" @click="adminPwdDialog=null">取消</button>
+            <button class="btn-prime sm" @click="handleResetUserPwd">确认重置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alert Rule Dialog -->
+      <div v-if="adminAlertDialog" class="adm-overlay" @click.self="adminAlertDialog=null">
+        <div class="adm-dialog">
+          <h3 class="adm-dialog-title">创建告警规则</h3>
+          <div class="adm-dialog-body">
+            <div class="fld"><label>名称</label><input v-model="adminAlertForm.name" class="si" required/></div>
+            <div class="fld"><label>监控指标</label><select v-model="adminAlertForm.metric" class="sel-sm" style="width:100%;padding:10px"><option value="cpu_percent">CPU 使用率</option><option value="memory_percent">内存使用率</option><option value="disk_percent">磁盘使用率</option></select></div>
+            <div class="fld"><label>阈值</label><input v-model.number="adminAlertForm.threshold" class="si" type="number" required/></div>
+            <div class="fld"><label>比较方式</label><select v-model="adminAlertForm.operator" class="sel-sm" style="width:100%;padding:10px"><option value="gt">大于</option><option value="gte">大于等于</option><option value="lt">小于</option><option value="lte">小于等于</option></select></div>
+          </div>
+          <div class="adm-dialog-actions">
+            <button class="btn-sm" @click="adminAlertDialog=null">取消</button>
+            <button class="btn-prime sm" @click="handleCreateAlert">创建</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </main>
 </div>
 </template>
@@ -1602,6 +1993,60 @@ button,input,select,textarea{font-family:var(--fu)}
 .hi-meta{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--t3);flex-wrap:nowrap;overflow:hidden}
 .hi-repo{color:var(--v);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:90px;font-family:var(--fm);font-size:10px}
 .hi-dot{opacity:.4}
+
+/* ── ADMIN PANEL ── */
+.admin-panel{display:flex;flex-direction:column;height:100%}
+.admin-content{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:16px}
+.adm-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.adm-table-wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:var(--r);background:var(--bg2)}
+.adm-table{width:100%;border-collapse:collapse;font-size:12.5px}
+.adm-table th{padding:10px 12px;text-align:left;font-size:10.5px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--bd);background:var(--bg3);white-space:nowrap}
+.adm-table td{padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.03);color:var(--t1);white-space:nowrap}
+.adm-table tr:hover td{background:var(--bg3)}
+.adm-email{font-family:var(--fm);font-size:11px;color:var(--t2)}
+.adm-actions{display:flex;gap:4px}
+.adm-empty{text-align:center;padding:24px;color:var(--t3)}
+.adm-empty-text{color:var(--t3);font-size:12.5px;padding:8px 0}
+.adm-mono{font-family:var(--fm);font-size:11px}
+.adm-detail{max-width:300px;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--t2)}
+.role-badge{padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700}
+.role-badge.admin{background:rgba(129,140,248,.15);color:#818CF8;border:1px solid rgba(129,140,248,.3)}
+.role-badge.user{background:var(--p1);color:var(--p);border:1px solid var(--p2)}
+.status-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+.status-dot.active{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.status-dot.disabled{background:var(--er)}
+.status-dot.healthy{background:var(--ok)}.status-dot.unhealthy{background:var(--er)}
+.status-dot.configured{background:var(--am)}.status-dot.not_configured{background:var(--t3)}
+.adm-action-badge{background:var(--v1);color:var(--v);padding:2px 7px;border-radius:4px;font-size:10px;font-weight:600}
+.adm-type-chip{display:inline-block;background:var(--bg3);border:1px solid var(--bd);border-radius:4px;padding:1px 6px;font-size:9.5px;margin-right:4px;font-family:var(--fm);color:var(--t2)}
+.adm-pagination{display:flex;align-items:center;gap:8px;justify-content:center;padding:8px 0}
+.adm-pg-info{font-size:11px;color:var(--t3)}.adm-pg-cur{font-weight:700;color:var(--p);min-width:24px;text-align:center}
+.adm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px}
+.adm-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:16px;display:flex;align-items:center;gap:14px;transition:var(--tr)}
+.adm-card:hover{border-color:var(--bd2);transform:translateY(-1px)}
+.adm-card.mini{padding:12px;flex-direction:column;text-align:center;gap:4px}
+.adm-card-icon{font-size:28px;flex-shrink:0}
+.adm-card-body{display:flex;flex-direction:column;gap:2px}
+.adm-card-val{font-family:var(--fd);font-size:24px;font-weight:700;line-height:1}
+.adm-card-label{font-size:10.5px;color:var(--t3);font-weight:600}
+.adm-section{display:flex;flex-direction:column;gap:10px}
+.adm-sec-title{font-family:var(--fd);font-size:14px;font-weight:700;color:var(--t0);display:flex;align-items:center}
+.adm-health-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}
+.adm-health-card{background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs);padding:12px;display:flex;align-items:center;gap:10px;transition:var(--tr)}
+.adm-health-card:hover{border-color:var(--bd2)}
+.adm-health-card.unhealthy{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.05)}
+.adm-hc-name{font-weight:600;font-size:12.5px;color:var(--t0);flex:1}
+.adm-hc-detail{font-size:10.5px;color:var(--t2);max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.adm-hc-latency{font-family:var(--fm);font-size:10px;color:var(--t3)}
+.adm-config-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px}
+.adm-config-item{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--bd);border-radius:var(--rs);padding:10px 14px}
+.adm-cfg-key{font-family:var(--fm);font-size:11px;color:var(--v);min-width:200px;flex-shrink:0}
+.adm-cfg-hint{font-size:10px;color:var(--t3);margin-left:auto}
+.adm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);z-index:100;display:flex;align-items:center;justify-content:center}
+.adm-dialog{background:var(--bg2);border:1px solid var(--bd2);border-radius:var(--r);padding:24px;width:420px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.adm-dialog-title{font-family:var(--fd);font-size:17px;font-weight:700;color:var(--t0);margin-bottom:16px}
+.adm-dialog-body{display:flex;flex-direction:column;gap:12px}
+.adm-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 
 /* ── RESPONSIVE ── */
 @media(max-width:768px){

@@ -45,7 +45,8 @@ def _init_db() -> None:
                 email        TEXT    UNIQUE NOT NULL,
                 password_hash TEXT   NOT NULL,
                 created_at   INTEGER NOT NULL,
-                is_active    INTEGER DEFAULT 1
+                is_active    INTEGER DEFAULT 1,
+                role         TEXT    DEFAULT 'user'
             );
             CREATE TABLE IF NOT EXISTS reset_tokens (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,6 +57,11 @@ def _init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
         """)
+        # 为旧数据库添加 role 字段
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+        except sqlite3.OperationalError:
+            pass
         conn.commit()
 
 
@@ -178,6 +184,7 @@ class UserResponse(BaseModel):
     username:   str
     email:      str
     created_at: int
+    role:       str = "user"
 
 
 class AuthResponse(BaseModel):
@@ -222,7 +229,8 @@ def register(request: RegisterRequest):
 
     return UserResponse(
         id=row["id"], username=row["username"],
-        email=row["email"], created_at=row["created_at"]
+        email=row["email"], created_at=row["created_at"],
+        role=row["role"] if "role" in row.keys() else "user",
     )
 
 
@@ -243,12 +251,14 @@ def login(request: LoginRequest):
         "sub":      row["id"],
         "email":    row["email"],
         "username": row["username"],
+        "role":     row["role"] if "role" in row.keys() else "user",
     })
     return AuthResponse(
         access_token=token,
         user=UserResponse(
             id=row["id"], username=row["username"],
-            email=row["email"], created_at=row["created_at"]
+            email=row["email"], created_at=row["created_at"],
+            role=row["role"] if "role" in row.keys() else "user",
         ),
     )
 
@@ -262,7 +272,8 @@ def get_me(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="用户不存在")
     return UserResponse(
         id=row["id"], username=row["username"],
-        email=row["email"], created_at=row["created_at"]
+        email=row["email"], created_at=row["created_at"],
+        role=row["role"] if "role" in row.keys() else "user",
     )
 
 
