@@ -182,10 +182,4 @@ cd ui
 npm run build
 ```
 
-## 进一步阅读
-
-- [环境配置](docs/SETUP.md)
-- [RAG 设计](docs/RAG.md)
-- [项目进展](docs/PROGRESS.md)
-- [开发计划](docs/PLAN.md)
-- [测试计划](docs/TEST_PLAN.md)
+- docs/TEST_PLAN.md)

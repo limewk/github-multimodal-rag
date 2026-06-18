@@ -1,37 +1,34 @@
-# FastAPI Backend
-fastapi
-uvicorn
+# FastAPI Backend (必需)
+fastapi>=0.104.0
+uvicorn>=0.24.0
 
-# GitHub API Integration
-PyGithub
+# Core RAG Framework (必需)
+langchain-core>=0.2.0
+langchain-openai>=0.1.0
+langchain-text-splitters>=0.1.0
 
-# Core RAG Framework
-langchain
-langchain-core
-langchain-community
-langchain-openai
-langchain-text-splitters
-jinja2
+# Vector Database (必需)
+qdrant-client>=1.7.0
 
-# Prompt Management
-ai-prompter
+# File Processing (必需)
+python-multipart>=0.0.6
+pypdf>=4.0.0
+python-docx>=1.1.0
 
-# Vector Database
-qdrant-client
+# Utilities (必需)
+python-dotenv>=1.0.0
+pydantic>=2.5.0
+psutil>=5.9.0
 
-# Auth (JWT / password hashing — no extra deps needed, using stdlib)
-# python-jose[cryptography]  # optional: swap for stronger JWT if needed
-# passlib[bcrypt]            # optional: swap for argon2/bcrypt hashing
+# GitHub API Integration (可选 - 仅需读取 GitHub Issues 时安装)
+PyGithub>=2.0.0
 
-# Code parsing / AST
-tree-sitter          # optional: for advanced multi-language AST (future use)
+# Auth (可选 - 使用更强大的 JWT/password hashing)
+# python-jose[cryptography]>=3.3.0
+# passlib[bcrypt]>=1.7.4
 
-# Utilities
-python-dotenv
-python-multipart
-requests
-pydantic
-psutil
+# Code parsing / AST (可选 - 未来高级多语言 AST 支持)
+# tree-sitter>=0.20.0
 
-# Testing
-pytest
+# Testing (开发环境)
+pytest>=7.4.0
